@@ -20,8 +20,8 @@ services:
         restart: always
         build:
             context: ./
-            dockerfile: WorkR/Dockerfile
-        image: WorkR:latest
+            dockerfile: Dockerfile
+        image: workr:latest
         container_name: WorkR
         volumes:
             - ./:/code/
@@ -63,8 +63,8 @@ services:
         restart: always
         build:
             context: ./
-            dockerfile: WorkR/Dockerfile
-        image: WorkR:latest
+            dockerfile: Dockerfile
+        image: workr:latest
         container_name: WorkR2
         volumes:
             - ./:/code/

@@ -34,13 +34,13 @@ RUN apt-get install -y \
 
 
 # Install Python packages from requirements.txt
-RUN pip install -r WorkR/requirements.txt
+RUN pip install -r requirements.txt
 
 # Install specific versions of PyTorch
 # RUN pip install torch==1.7.1+cu101 torchvision==0.8.2+cu101 torchaudio==0.7.2 -f https://download.pytorch.org/whl/torch_stable.html
 
 # Install R packages from r-packages.txt
-RUN Rscript -e "install.packages(readLines('WorkR/r-packages.txt'))"
+RUN Rscript -e "install.packages(readLines('r-packages.txt'))"
 # Try this because vegan does not want to install in the above line
 # RUN Rscript -e "install.packages('vegan', dependencies=TRUE, repos='http://cran.rstudio.com/')"
 # Install oSCR from GitHub
