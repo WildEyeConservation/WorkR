@@ -1,0 +1,105 @@
+# Copyright 2023
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+
+# http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+version: '3.1'
+services:
+
+    WorkR:
+        # r celery worker
+        restart: always
+        build:
+            context: ./
+            dockerfile: WorkR/Dockerfile
+        image: WorkR:latest
+        container_name: WorkR
+        volumes:
+            - ./:/code/
+        environment:
+            - PYTHONPATH=/code
+            - FLASK_APP=/code/TrapTagger.py
+            - REDIS_IP=${REDIS_IP}
+            - DATABASE_NAME=${DATABASE_NAME}
+            - HOST_IP=${HOST_IP}
+            - DNS=${DNS}
+            - DATABASE_SERVER=${DATABASE_SERVER}
+            - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+            - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+            - REGION_NAME=${REGION_NAME}
+            - SECRET_KEY=${SECRET_KEY}
+            - MAIL_USERNAME=${MAIL_USERNAME}
+            - MAIL_PASSWORD=${MAIL_PASSWORD}
+            - BRANCH=${BRANCH}
+            - SG_ID=${SG_ID}
+            - PUBLIC_SUBNET_ID=${PUBLIC_SUBNET_ID}
+            - PRIVATE_SUBNET_ID=${PRIVATE_SUBNET_ID}
+            - TOKEN=${TOKEN}
+            - PARALLEL_AMI=${PARALLEL_AMI}
+            - KEY_NAME=${KEY_NAME}
+            - QUEUE=${QUEUE}
+            - WORKER_NAME=${WORKER_NAME}
+            - MAIN_GIT_REPO=${MAIN_GIT_REPO}
+            - MONITORED_EMAIL_ADDRESS=${MONITORED_EMAIL_ADDRESS}
+            - BUCKET=${BUCKET}
+            - IAM_ADMIN_GROUP=${IAM_ADMIN_GROUP}
+            - AWS_S3_DOWNLOAD_ACCESS_KEY_ID=${AWS_S3_DOWNLOAD_ACCESS_KEY_ID}
+            - AWS_S3_DOWNLOAD_SECRET_ACCESS_KEY=${AWS_S3_DOWNLOAD_SECRET_ACCESS_KEY}
+        command: celery -A WorkR.worker worker -E -n ${WORKER_NAME} -Q ${QUEUE} -Ofair --concurrency=${CONCURRENCY} --loglevel=info
+        networks:
+            - my-network
+
+    WorkR2:
+        # r celery worker
+        restart: always
+        build:
+            context: ./
+            dockerfile: WorkR/Dockerfile
+        image: WorkR:latest
+        container_name: WorkR2
+        volumes:
+            - ./:/code/
+        environment:
+            - PYTHONPATH=/code
+            - FLASK_APP=/code/TrapTagger.py
+            - REDIS_IP=${REDIS_IP}
+            - DATABASE_NAME=${DATABASE_NAME}
+            - HOST_IP=${HOST_IP}
+            - DNS=${DNS}
+            - DATABASE_SERVER=${DATABASE_SERVER}
+            - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+            - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+            - REGION_NAME=${REGION_NAME}
+            - SECRET_KEY=${SECRET_KEY}
+            - MAIL_USERNAME=${MAIL_USERNAME}
+            - MAIL_PASSWORD=${MAIL_PASSWORD}
+            - BRANCH=${BRANCH}
+            - SG_ID=${SG_ID}
+            - PUBLIC_SUBNET_ID=${PUBLIC_SUBNET_ID}
+            - PRIVATE_SUBNET_ID=${PRIVATE_SUBNET_ID}
+            - TOKEN=${TOKEN}
+            - PARALLEL_AMI=${PARALLEL_AMI}
+            - KEY_NAME=${KEY_NAME}
+            - QUEUE=${QUEUE}
+            - WORKER_NAME=${WORKER_NAME}
+            - MAIN_GIT_REPO=${MAIN_GIT_REPO}
+            - MONITORED_EMAIL_ADDRESS=${MONITORED_EMAIL_ADDRESS}
+            - BUCKET=${BUCKET}
+            - IAM_ADMIN_GROUP=${IAM_ADMIN_GROUP}
+            - AWS_S3_DOWNLOAD_ACCESS_KEY_ID=${AWS_S3_DOWNLOAD_ACCESS_KEY_ID}
+            - AWS_S3_DOWNLOAD_SECRET_ACCESS_KEY=${AWS_S3_DOWNLOAD_SECRET_ACCESS_KEY}
+        command: celery -A WorkR.worker worker -E -n ${WORKER_NAME} -Q ${QUEUE} -Ofair --concurrency=${CONCURRENCY} --loglevel=info
+        networks:
+            - my-network
+
+networks:
+    my-network:
