@@ -28,3 +28,12 @@ class Config(object):
     SQLALCHEMY_DATABASE_NAME =  os.environ.get('DATABASE_NAME')
     SQLALCHEMY_DATABASE_URI = SQLALCHEMY_DATABASE_SERVER+"/"+SQLALCHEMY_DATABASE_NAME
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+    DETECTOR_THRESHOLDS = {
+        'MDv4': 0.8,
+        'MDv5a': 0.2,
+        'MDv5b': 0.1,
+        'error': 1.0,
+        'golden': 0.9,
+        'user': 0
+    }
