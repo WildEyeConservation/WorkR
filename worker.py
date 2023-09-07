@@ -26,14 +26,7 @@ import numpy as np
 import utm
 from app import db
 from app.models import *
-# from flask import Flask
-# from flask_sqlalchemy import SQLAlchemy
-# from flask_login import LoginManager
-
-# app = Flask(__name__)
-# app.config.from_object(Config)
-# db = SQLAlchemy(app)
-# login = LoginManager(app)
+from sqlalchemy.sql import func, or_, alias, and_, distinct
 
 REDIS_IP = os.environ.get('REDIS_IP') or '127.0.0.1'
 app = Celery('WorkR', broker='redis://'+REDIS_IP,backend='redis://'+REDIS_IP,broker_transport_options={'visibility_timeout': 86400},result_expires=86400,task_acks_late=True)
@@ -256,11 +249,11 @@ def calculate_activity_pattern(self,task_ids,trapgroups,groups,species,baseUnit,
         error = None
 
     except Exception as exc:
-        app.logger.info(' ')
-        app.logger.info('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
-        app.logger.info(traceback.format_exc())
-        app.logger.info('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
-        app.logger.info(' ')
+        print(' ')
+        print('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+        print(traceback.format_exc())
+        print('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+        print(' ')
         status = 'FAILURE' 
         error = str(exc)
 
@@ -524,7 +517,7 @@ def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroup
                         fileName = user_folder+'/docs/' + 'Occupancy' + '_' + species + '_' + df_name + '.csv'
                         GLOBALS.s3client.put_object(Bucket=bucket,Key=fileName,Body=temp_file)
                         occupancy_url = "https://"+ bucket + ".s3.amazonaws.com/" + fileName
-                        app.logger.info(occupancy_url)
+                        print(occupancy_url)
                         occu_urls.append(occupancy_url)
 
                         # Schedule deletion
@@ -642,11 +635,11 @@ def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroup
         error = None
 
     except Exception as exc:
-        app.logger.info(' ')
-        app.logger.info('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
-        app.logger.info(traceback.format_exc())
-        app.logger.info('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
-        app.logger.info(' ')
+        print(' ')
+        print('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+        print(traceback.format_exc())
+        print('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+        print(' ')
         status = 'FAILURE'
         error = str(exc)
 
@@ -875,7 +868,7 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                         fileName += df_name + '.csv'
                         GLOBALS.s3client.put_object(Bucket=bucket,Key=fileName,Body=temp_file)
                         scr_url = "https://"+ bucket + ".s3.amazonaws.com/" + fileName
-                        app.logger.info(scr_url)
+                        print(scr_url)
                         scr_urls.append(scr_url)
 
                         # Schedule deletion
@@ -1042,11 +1035,11 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                 error = None
 
     except Exception as exc:
-        app.logger.info(' ')
-        app.logger.info('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
-        app.logger.info(traceback.format_exc())
-        app.logger.info('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
-        app.logger.info(' ')
+        print(' ')
+        print('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+        print(traceback.format_exc())
+        print('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+        print(' ')
         status = 'FAILURE'
         error = str(exc)
 

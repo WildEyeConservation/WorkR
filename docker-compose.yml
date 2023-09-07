@@ -25,7 +25,8 @@ services:
         container_name: WorkR
         volumes:
             - ./:/code/
-            - /home/ubuntu/TrapTagger/app/:/code/app/
+            - /home/ubuntu/TrapTagger/app/models.py:/code/app/models.py
+            - /home/ubuntu/TrapTagger/WorkR/__init__.py:/code/app/__init__.py
         environment:
             - PYTHONPATH=/code
             - FLASK_APP=/code/TrapTagger.py
@@ -70,7 +71,8 @@ services:
         container_name: WorkR2
         volumes:
             - ./:/code/
-            - /home/ubuntu/TrapTagger/app/:/code/app/
+            - /home/ubuntu/TrapTagger/app/models.py:/code/app/models.py
+            - /home/ubuntu/TrapTagger/WorkR/__init__.py:/code/app/__init__.py
         environment:
             - PYTHONPATH=/code
             - FLASK_APP=/code/TrapTagger.py
