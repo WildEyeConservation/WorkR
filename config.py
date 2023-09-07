@@ -19,6 +19,7 @@ import os
 class Config(object):
     WORKER_NAME = 'celery@worker'+str(os.environ.get('WORKER_NUMBER'))+'@'+os.environ.get('WORKER_NAME')
     QUEUE = os.environ.get('QUEUE')
+    MONKEY_PATCH = os.environ.get('MONKEY_PATCH')
 
     # SQLAlchemy Config
     SECRET_KEY = os.environ.get('SECRET_KEY')
