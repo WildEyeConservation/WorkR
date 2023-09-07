@@ -19,3 +19,10 @@ import os
 class Config(object):
     WORKER_NAME = 'celery@worker'+str(os.environ.get('WORKER_NUMBER'))+'@'+os.environ.get('WORKER_NAME')
     QUEUE = os.environ.get('QUEUE')
+
+    # SQLAlchemy Config
+    SECRET_KEY = os.environ.get('SECRET_KEY')
+    SQLALCHEMY_DATABASE_SERVER =  os.environ.get('DATABASE_SERVER')
+    SQLALCHEMY_DATABASE_NAME =  os.environ.get('DATABASE_NAME')
+    SQLALCHEMY_DATABASE_URI = SQLALCHEMY_DATABASE_SERVER+"/"+SQLALCHEMY_DATABASE_NAME
+    SQLALCHEMY_TRACK_MODIFICATIONS = False

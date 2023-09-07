@@ -23,6 +23,13 @@ import pytz
 import timezonefinder
 import numpy as np
 import utm
+from flask import Flask
+from flask_sqlalchemy import SQLAlchemy
+from models import *
+
+app = Flask(__name__)
+app.config.from_object(Config)
+db = SQLAlchemy(app)
 
 REDIS_IP = os.environ.get('REDIS_IP') or '127.0.0.1'
 app = Celery('WorkR', broker='redis://'+REDIS_IP,backend='redis://'+REDIS_IP,broker_transport_options={'visibility_timeout': 86400},result_expires=86400,task_acks_late=True)
