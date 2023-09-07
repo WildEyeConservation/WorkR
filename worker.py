@@ -25,7 +25,7 @@ import timezonefinder
 import numpy as np
 import utm
 from app import db
-from models import *
+from app.models import *
 # from flask import Flask
 # from flask_sqlalchemy import SQLAlchemy
 # from flask_login import LoginManager
