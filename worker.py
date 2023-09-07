@@ -17,12 +17,6 @@ limitations under the License.
 import os
 from celery import Celery
 from celery.signals import celeryd_after_setup
-import rpy2.robjects as robjects
-from rpy2.robjects import pandas2ri
-import pytz
-import timezonefinder
-import numpy as np
-import utm
 
 REDIS_IP = os.environ.get('REDIS_IP') or '127.0.0.1'
 app = Celery('WorkR', broker='redis://'+REDIS_IP,backend='redis://'+REDIS_IP,broker_transport_options={'visibility_timeout': 86400},result_expires=86400,task_acks_late=True)
