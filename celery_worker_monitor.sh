@@ -19,7 +19,7 @@
 # 23 -> idle
 # 100 -> error state
 {
-  RESPONSE=$(celery -A WorkR.worker inspect -d celery@$1 active)
+  RESPONSE=$(celery -A worker inspect -d celery@$1 active)
 } || {
   exit 100
 }
