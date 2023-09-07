@@ -28,7 +28,7 @@ REDIS_IP = os.environ.get('REDIS_IP') or '127.0.0.1'
 app = Celery('WorkR', broker='redis://'+REDIS_IP,backend='redis://'+REDIS_IP,broker_transport_options={'visibility_timeout': 86400},result_expires=86400,task_acks_late=True)
 workername="default"
 
-@app.task(bind=True,soft_time_limit=82800)
+@app.task(name='WorkR.calculate_activity_pattern',bind=True,soft_time_limit=82800)
 def calculate_activity_pattern(self,task_ids,trapgroups,groups,species,baseUnit,user_id,startDate,endDate,unit,centre,time,overlap, bucket, user_folder, csv, timeToIndependence, timeToIndependenceUnit):
     ''' Calculates the activity patterns for a set of species with R'''
     try:
@@ -258,7 +258,7 @@ def calculate_activity_pattern(self,task_ids,trapgroups,groups,species,baseUnit,
 
     return {'status': status, 'error': error, 'activity_url': activity_url}
 
-@app.task(bind=True,soft_time_limit=82800)
+@app.task(name='WorkR.calculate_occupancy_analysis',bind=True,soft_time_limit=82800)
 def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroups, groups, startDate, endDate,  window, siteCovs, detCovs, covOptions, user_id, user_folder, bucket, csv, timeToIndependence, timeToIndependenceUnit):
     ''' Calculates occupancy analysis'''
     try:
@@ -644,7 +644,7 @@ def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroup
 
     return { 'status': status, 'error': error, 'occupancy_results': occupancy_results }
 
-@app.task(bind=True,soft_time_limit=82800)
+@app.task(name='WorkR.calculate_spatial_capture_recapture',bind=True,soft_time_limit=82800)
 def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgroups, groups, startDate, endDate, window, tags, siteCovs, covOptions, bucket, user_folder, csv=False):
     ''' Calculates spatial capture recapture for a given species in R '''	
     try:
