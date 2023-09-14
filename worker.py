@@ -30,11 +30,33 @@ from app import db
 from app.models import *
 from sqlalchemy.sql import func, or_, alias, and_, distinct
 import traceback
-from app.functions.globals import getChildList
+import pandas as pd
+from datetime import datetime, timedelta
+import tempfile
+import boto3
 
 REDIS_IP = os.environ.get('REDIS_IP') or '127.0.0.1'
 app = Celery('WorkR', broker='redis://'+REDIS_IP,backend='redis://'+REDIS_IP,broker_transport_options={'visibility_timeout': 86400},result_expires=86400,task_acks_late=True)
 workername="default"
+
+s3client = boto3.client('s3')
+nothing_id = db.session.query(Label).filter(Label.description=='Nothing').first().id
+knocked_id = db.session.query(Label).filter(Label.description=='Knocked Down').first().id
+vhl_id = db.session.query(Label).filter(Label.description=='Vehicles/Humans/Livestock').first().id
+unknown_id = db.session.query(Label).filter(Label.description=='Unknown').first().id
+wrong_id = db.session.query(Label).filter(Label.description=='Wrong').first().id
+remove_false_detections_id = db.session.query(Label).filter(Label.description=='Remove False Detections').first().id
+
+def getChildList(label,task_id):
+    '''Returns a list of all child label IDs for the specified label for the specified task.'''
+
+    children = db.session.query(Label).filter(Label.parent_id==label.id).filter(Label.task_id==task_id).all()
+    label_list = []
+    for lab in children:
+        label_list.append(lab.id)
+        if db.session.query(Label).filter(Label.parent_id==lab.id).filter(Label.task_id==task_id).first():
+            label_list.extend(getChildList(lab,task_id))
+    return label_list
 
 @app.task(name='WorkR.calculate_activity_pattern',bind=True,soft_time_limit=82800)
 def calculate_activity_pattern(self,task_ids,trapgroups,groups,species,baseUnit,user_id,startDate,endDate,unit,centre,time,overlap, bucket, user_folder, csv, timeToIndependence, timeToIndependenceUnit):
@@ -140,8 +162,8 @@ def calculate_activity_pattern(self,task_ids,trapgroups,groups,species,baseUnit,
                     label_list.extend(children)
                 baseQuery = baseQuery.filter(Labelgroup.labels.any(Label.id.in_(label_list)))
             else:
-                vhl = db.session.query(Label).get(GLOBALS.vhl_id)
-                label_list = [GLOBALS.vhl_id,GLOBALS.nothing_id,GLOBALS.knocked_id]
+                vhl = db.session.query(Label).get(vhl_id)
+                label_list = [vhl_id,nothing_id,knocked_id]
                 for task_id in task_ids:
                     label_list.extend(getChildList(vhl,int(task_id)))
                 baseQuery = baseQuery.filter(~Labelgroup.labels.any(Label.id.in_(label_list)))
@@ -214,11 +236,11 @@ def calculate_activity_pattern(self,task_ids,trapgroups,groups,species,baseUnit,
                     for specie in species:
                         fileName += '_' + specie
                     fileName += '.csv'
-                    GLOBALS.s3client.put_object(Bucket=bucket,Key=fileName,Body=temp_file)
+                    s3client.put_object(Bucket=bucket,Key=fileName,Body=temp_file)
                     activity_url = "https://"+ bucket + ".s3.amazonaws.com/" + fileName
 
                     # Schedule deletion
-                    deleteFile.apply_async(kwargs={'fileName': fileName}, countdown=21600)
+                    # deleteFile.apply_async(kwargs={'fileName': fileName}, countdown=21600)
 
             else: 
                 if len(df)> 0:
@@ -241,11 +263,11 @@ def calculate_activity_pattern(self,task_ids,trapgroups,groups,species,baseUnit,
                         lng = robjects.FloatVector([lng])
                         r.calculate_activity_pattern(r_df,file_name,species_r,centre,unit,time,overlap,lat,lng,utc_offset_hours,tz)
                         temp_file = open(temp_file.name, 'rb')
-                        GLOBALS.s3client.put_object(Bucket=bucket,Key=fileName,Body=temp_file)
+                        s3client.put_object(Bucket=bucket,Key=fileName,Body=temp_file)
                         activity_url = "https://"+ bucket + ".s3.amazonaws.com/" + fileName
 
                         # Schedule deletion
-                        deleteFile.apply_async(kwargs={'fileName': fileName}, countdown=21600)
+                        # deleteFile.apply_async(kwargs={'fileName': fileName}, countdown=21600)
                 else:
                     activity_url = None
 
@@ -406,8 +428,8 @@ def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroup
                     label_list.extend(getChildList(label,int(label.task_id)))
                 baseQuery = baseQuery.filter(Labelgroup.labels.any(Label.id.in_(label_list)))
             else:
-                vhl = db.session.query(Label).get(GLOBALS.vhl_id)
-                label_list = [GLOBALS.vhl_id,GLOBALS.nothing_id,GLOBALS.knocked_id]
+                vhl = db.session.query(Label).get(vhl_id)
+                label_list = [vhl_id,nothing_id,knocked_id]
                 for task_id in task_ids:
                     label_list.extend(getChildList(vhl,int(task_id)))
                 baseQuery = baseQuery.filter(~Labelgroup.labels.any(Label.id.in_(label_list)))
@@ -519,13 +541,13 @@ def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroup
                         else:
                             df.to_csv(temp_file.name, index=False)
                         fileName = user_folder+'/docs/' + 'Occupancy' + '_' + species + '_' + df_name + '.csv'
-                        GLOBALS.s3client.put_object(Bucket=bucket,Key=fileName,Body=temp_file)
+                        s3client.put_object(Bucket=bucket,Key=fileName,Body=temp_file)
                         occupancy_url = "https://"+ bucket + ".s3.amazonaws.com/" + fileName
                         print(occupancy_url)
                         occu_urls.append(occupancy_url)
 
                         # Schedule deletion
-                        deleteFile.apply_async(kwargs={'fileName': fileName}, countdown=21600)
+                        # deleteFile.apply_async(kwargs={'fileName': fileName}, countdown=21600)
 
                 occupancy_results = {
                     'csv_urls': occu_urls
@@ -583,12 +605,12 @@ def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroup
                                     file_name = temp_file.name.split('.JPG')[0]
                                     r.plot_occupancy(j+1, file_name, best_model_cov_names[i])
                                     temp_file = open(temp_file.name, 'rb')
-                                    GLOBALS.s3client.put_object(Bucket=bucket,Key=fileName,Body=temp_file)
+                                    s3client.put_object(Bucket=bucket,Key=fileName,Body=temp_file)
                                     occupancy_url = "https://"+ bucket + ".s3.amazonaws.com/" + fileName
                                     occu['images'].append(occupancy_url)
 
                                     # Schedule deletion
-                                    deleteFile.apply_async(kwargs={'fileName': fileName}, countdown=21600)
+                                    # deleteFile.apply_async(kwargs={'fileName': fileName}, countdown=21600)
                             occu_files.append(occu)
 
                     else:
@@ -604,12 +626,12 @@ def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroup
                                     file_name = temp_file.name.split('.JPG')[0]
                                     r.plot_occupancy(j+1, file_name, model_name)
                                     temp_file = open(temp_file.name, 'rb')
-                                    GLOBALS.s3client.put_object(Bucket=bucket,Key=fileName,Body=temp_file)
+                                    s3client.put_object(Bucket=bucket,Key=fileName,Body=temp_file)
                                     occupancy_url = "https://"+ bucket + ".s3.amazonaws.com/" + fileName
                                     occu['images'].append(occupancy_url)
 
                                     # Schedule deletion
-                                    deleteFile.apply_async(kwargs={'fileName': fileName}, countdown=21600)
+                                    # deleteFile.apply_async(kwargs={'fileName': fileName}, countdown=21600)
                             occu_files.append(occu)
 
                     occupancy_results = {
@@ -870,13 +892,13 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                         for specie in species:
                             fileName += specie + '_'
                         fileName += df_name + '.csv'
-                        GLOBALS.s3client.put_object(Bucket=bucket,Key=fileName,Body=temp_file)
+                        s3client.put_object(Bucket=bucket,Key=fileName,Body=temp_file)
                         scr_url = "https://"+ bucket + ".s3.amazonaws.com/" + fileName
                         print(scr_url)
                         scr_urls.append(scr_url)
 
                         # Schedule deletion
-                        deleteFile.apply_async(kwargs={'fileName': fileName}, countdown=21600)
+                        # deleteFile.apply_async(kwargs={'fileName': fileName}, countdown=21600)
 
                 results = scr_urls
                 status = 'SUCCESS'
@@ -1012,12 +1034,12 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                 for i in range(len(plots)):
                     fileName = user_folder+'/docs/' + 'SCR_' + plots[i] + '_' + datetime.now().strftime('%Y-%m-%d_%H:%M:%S') + '.JPG'
                     temp_file = open(temp_files[i].name, 'rb')
-                    GLOBALS.s3client.put_object(Bucket=bucket,Key=fileName,Body=temp_file)
+                    s3client.put_object(Bucket=bucket,Key=fileName,Body=temp_file)
                     scr_files.append("https://"+ bucket + ".s3.amazonaws.com/" + fileName)
                     temp_files[i].close()
 
                     # Schedule deletion
-                    deleteFile.apply_async(kwargs={'fileName': fileName}, countdown=21600)
+                    # deleteFile.apply_async(kwargs={'fileName': fileName}, countdown=21600)
 
 
                 results = {
