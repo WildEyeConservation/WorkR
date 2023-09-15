@@ -304,7 +304,8 @@ plot_occupancy <- function(idx, file_name, cov_name){
             theme(axis.text.x  = element_text(angle = 90,hjust = 1, vjust = 0.5)) +
             labs(y=y_lab , x = "Sites")+
             theme(axis.text=element_text(size=12, color =  "black")) +
-            coord_flip()
+            ylim(0,1) +
+            coord_flip() 
 
         print(b)
         dev.off()
