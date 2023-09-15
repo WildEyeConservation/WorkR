@@ -575,6 +575,8 @@ def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroup
                     total_sites_occupied = int(occupancy_results.rx2('total_sites_occupied')[0])
                     model_name = str(occupancy_results.rx2('model_sel_name')[0])
                     model_formula = str(occupancy_results.rx2('best_model_formula')[0])
+                    occu_est = float(occupancy_results.rx2('occu_est')[0])
+                    det_est = float(occupancy_results.rx2('det_est')[0])
 
                     aic = pd.DataFrame(occupancy_results.rx2('aic'))
                     aic = aic.replace([np.inf, -np.inf], 'Inf')
@@ -591,6 +593,7 @@ def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroup
                     best_model_summary_det = best_model_summary_det.replace([np.nan], 'NA')
                     best_model_summary_det = best_model_summary_det.to_dict(orient='records')
 
+                    predict_tables = []
                     # Get the temp files
                     if len(best_model_cov_names) > 0:
                         occu_files = []
@@ -603,11 +606,21 @@ def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroup
                                     fileName = user_folder+'/docs/' + 'Occupancy' + '_' + species + '_' + best_model_cov_names[i] + '_' + str(j+1)
                                     fileName += '_' + datetime.now().strftime('%Y-%m-%d_%H:%M:%S') + '.JPG'
                                     file_name = temp_file.name.split('.JPG')[0]
-                                    r.plot_occupancy(j+1, file_name, best_model_cov_names[i])
+                                    pred = r.plot_occupancy(j+1, file_name, best_model_cov_names[i])
                                     temp_file = open(temp_file.name, 'rb')
                                     s3client.put_object(Bucket=bucket,Key=fileName,Body=temp_file)
                                     occupancy_url = "https://"+ bucket + ".s3.amazonaws.com/" + fileName
                                     occu['images'].append(occupancy_url)
+
+                                    pred_table = pd.DataFrame(pred.rx2('prediction_table')) 
+                                    if len(pred_table) > 0:
+                                        pred_table = pred_table.replace([np.inf, -np.inf], 'Inf')
+                                        pred_table = pred_table.replace([np.nan], 'NA')
+                                        pred_table = pred_table.to_dict(orient='records')
+                                        predict_tables.append({
+                                            'name': best_model_cov_names[i],
+                                            'table': pred_table
+                                        })
 
                                     # Schedule deletion
                                     # deleteFile.apply_async(kwargs={'fileName': fileName}, countdown=21600)
@@ -624,11 +637,21 @@ def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroup
                                     fileName = user_folder+'/docs/' + 'Occupancy' + '_' + species + '_' + model_name + '_' + str(j+1)
                                     fileName += '_' + datetime.now().strftime('%Y-%m-%d_%H:%M:%S') + '.JPG'
                                     file_name = temp_file.name.split('.JPG')[0]
-                                    r.plot_occupancy(j+1, file_name, model_name)
+                                    pred = r.plot_occupancy(j+1, file_name, model_name)
                                     temp_file = open(temp_file.name, 'rb')
                                     s3client.put_object(Bucket=bucket,Key=fileName,Body=temp_file)
                                     occupancy_url = "https://"+ bucket + ".s3.amazonaws.com/" + fileName
                                     occu['images'].append(occupancy_url)
+
+                                    pred_table = pd.DataFrame(pred.rx2('prediction_table')) 
+                                    if len(pred_table) > 0:
+                                        pred_table = pred_table.replace([np.inf, -np.inf], 'Inf')
+                                        pred_table = pred_table.replace([np.nan], 'NA')
+                                        pred_table = pred_table.to_dict(orient='records')
+                                        predict_tables.append({
+                                            'name': best_model_cov_names[i],
+                                            'table': pred_table
+                                        })
 
                                     # Schedule deletion
                                     # deleteFile.apply_async(kwargs={'fileName': fileName}, countdown=21600)
@@ -643,6 +666,9 @@ def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroup
                         'aic': aic,
                         'best_model_summary_state': best_model_summary_state,
                         'best_model_summary_det': best_model_summary_det,
+                        'occu_est': occu_est,
+                        'det_est': det_est,
+                        'predict_tables': predict_tables
                     }
 
                 else:
@@ -655,6 +681,9 @@ def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroup
                         'aic': [],
                         'best_model_summary_state': [],
                         'best_model_summary_det': [],
+                        'occu_est': 0,
+                        'det_est': 0,
+                        'predict_tables': []
                     }
 
         status = 'SUCCESS'

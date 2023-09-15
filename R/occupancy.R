@@ -203,6 +203,35 @@ occupancy <- function(detection_df, site_df, setup_col, retrieval_col, station_c
     best_model_cov_names <- all.vars(best_model_formula)
     formula_str <- deparse(best_model_formula)
 
+    # Occu & Det estimates (mean - without covariates) 
+    if (model_sel_name == '~1 ~ 1'){
+        occu_est = backTransform(best_model, type='state')@estimate
+        det_est = backTransform(best_model, type='det')@estimate
+        
+    }
+    else{
+        mod_sum <- summary(best_model)
+        nr_state <- nrow(mod_sum$state)
+        nr_det <- nrow(mod_sum$det)
+        
+        if (nr_state > 1){
+        coeff <- c(1, rep(0,nr_state-1))
+        occu_est = backTransform(linearComb(best_model, coefficients = coeff, type = 'state'))@estimate
+        }
+        else{
+        occu_est = backTransform(best_model, type='state')@estimate
+        }
+        
+        if (nr_det > 1){
+        coeff <- c(1, rep(0,nr_det-1))
+        det_est = backTransform(linearComb(best_model, coefficients = coeff, type = 'det'))@estimate
+        }
+        else{
+        det_est = backTransform(best_model, type='det')@estimate
+        }
+        
+    }
+
     # Convert best_model summary to dataframe
     best_model_summary <- summary(best_model)
     best_model_summary_state <- as.data.frame(best_model_summary$state)
@@ -217,7 +246,7 @@ occupancy <- function(detection_df, site_df, setup_col, retrieval_col, station_c
     best_model_summary_det <- best_model_summary_det[,c(ncol(best_model_summary_det),1:(ncol(best_model_summary_det)-1))]
 
     nr_plots <- 2
-    return_list <- list('nr_plots' = nr_plots, 'best_model_cov_names' = best_model_cov_names, 'naive_occu' = naive_occupancy, 'total_sites' = total_sites, 'total_sites_occupied' = sites_with_species, 'best_model_formula' = formula_str, 'model_sel_name' = model_sel_name, 'aic' = aic1, 'best_model_summary_state'= best_model_summary_state, 'best_model_summary_det' = best_model_summary_det)
+    return_list <- list('nr_plots' = nr_plots, 'best_model_cov_names' = best_model_cov_names, 'naive_occu' = naive_occupancy, 'total_sites' = total_sites, 'total_sites_occupied' = sites_with_species, 'best_model_formula' = formula_str, 'model_sel_name' = model_sel_name, 'aic' = aic1, 'best_model_summary_state'= best_model_summary_state, 'best_model_summary_det' = best_model_summary_det, 'occu_est' = occu_est, 'det_est' = det_est)
 
     species <<- species
     best_model <<- best_model
@@ -235,6 +264,7 @@ occupancy <- function(detection_df, site_df, setup_col, retrieval_col, station_c
 
 plot_occupancy <- function(idx, file_name, cov_name){
     # Plot occupancy for a species using the detection and site dataframes
+    prediction_table <- data.frame()
     if (cov_name %in% det_cov_names){
         pred_type <- "det"
         label <- "Detection probability"
@@ -291,6 +321,7 @@ plot_occupancy <- function(idx, file_name, cov_name){
 
         # Extract the first part of site_id before the first underscore
         pred1$site_label <- sapply(strsplit(as.character(pred1$site_id), "_"), "[", 1)
+        prediction_table <- as.data.frame(pred1)
 
         # Plot and save image locally 
         file_name <- paste0(file_name, ".JPG")
@@ -387,6 +418,7 @@ plot_occupancy <- function(idx, file_name, cov_name){
         dev.off()
     }
 
+    return(list('prediction_table' = prediction_table))
 }
 
 
