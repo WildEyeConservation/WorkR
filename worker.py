@@ -613,12 +613,14 @@ def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroup
                                     occu['images'].append(occupancy_url)
 
                                     pred_table = pd.DataFrame(pred.rx2('prediction_table')) 
+                                    pred_type = str(pred.rx2('type')[0])
                                     if len(pred_table) > 0:
                                         pred_table = pred_table.replace([np.inf, -np.inf], 'Inf')
                                         pred_table = pred_table.replace([np.nan], 'NA')
                                         pred_table = pred_table.to_dict(orient='records')
                                         predict_tables.append({
                                             'name': best_model_cov_names[i],
+                                            'type': pred_type,
                                             'table': pred_table
                                         })
 
@@ -644,12 +646,14 @@ def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroup
                                     occu['images'].append(occupancy_url)
 
                                     pred_table = pd.DataFrame(pred.rx2('prediction_table')) 
+                                    pred_type = str(pred.rx2('type')[0])
                                     if len(pred_table) > 0:
                                         pred_table = pred_table.replace([np.inf, -np.inf], 'Inf')
                                         pred_table = pred_table.replace([np.nan], 'NA')
                                         pred_table = pred_table.to_dict(orient='records')
                                         predict_tables.append({
                                             'name': model_name,
+                                            'type': pred_type,
                                             'table': pred_table
                                         })
 

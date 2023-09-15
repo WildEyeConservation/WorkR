@@ -265,6 +265,7 @@ occupancy <- function(detection_df, site_df, setup_col, retrieval_col, station_c
 plot_occupancy <- function(idx, file_name, cov_name){
     # Plot occupancy for a species using the detection and site dataframes
     prediction_table <- data.frame()
+    pred_type <- ''
     if (cov_name %in% det_cov_names){
         pred_type <- "det"
         label <- "Detection probability"
@@ -418,7 +419,7 @@ plot_occupancy <- function(idx, file_name, cov_name){
         dev.off()
     }
 
-    return(list('prediction_table' = prediction_table))
+    return(list('prediction_table' = prediction_table, 'type' = pred_type))
 }
 
 
