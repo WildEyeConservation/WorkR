@@ -649,7 +649,7 @@ def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroup
                                         pred_table = pred_table.replace([np.nan], 'NA')
                                         pred_table = pred_table.to_dict(orient='records')
                                         predict_tables.append({
-                                            'name': best_model_cov_names[i],
+                                            'name': model_name,
                                             'table': pred_table
                                         })
 
