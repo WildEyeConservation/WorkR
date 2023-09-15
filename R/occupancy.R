@@ -323,8 +323,14 @@ plot_occupancy <- function(idx, file_name, cov_name){
         # Extract the first part of site_id before the first underscore
         pred1$site_label <- sapply(strsplit(as.character(pred1$site_id), "_"), "[", 1)
         prediction_table <- as.data.frame(pred1)
-        prediction_table <- prediction_table[,c('site_label', 'Predicted', 'SE', 'lower', 'upper')]
-        colnames(prediction_table) <- c('Site', 'Predicted', 'Standard Error', 'Lower Bound', 'Upper Bound')
+        if (cov_name != '~1 ~ 1'){
+            prediction_table <- prediction_table[,c('site_label','Predicted', 'SE', 'lower', 'upper', cov_name)]
+            colnames(prediction_table) <- c('Site','Estimate', 'Standard Error', 'Lower Bound', 'Upper Bound', cov_name)
+        }
+        else{
+            prediction_table <- prediction_table[,c('site_label', 'Predicted', 'SE', 'lower', 'upper')]
+            colnames(prediction_table) <- c('Site', 'Estimate', 'Standard Error', 'Lower Bound', 'Upper Bound')
+        }
 
         # Plot and save image locally 
         file_name <- paste0(file_name, ".JPG")
