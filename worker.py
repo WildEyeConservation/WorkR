@@ -27,7 +27,7 @@ workername="default"
 @app.task(name='WorkR.calculate_activity_pattern',bind=True,soft_time_limit=82800)
 def calculate_activity_pattern(self,task_ids,trapgroups,groups,species,baseUnit,user_id,startDate,endDate,unit,centre,time,overlap, bucket, user_folder, csv, timeToIndependence, timeToIndependenceUnit):
     ''' Calculates the activity patterns for a set of species with R'''
-    return {'status': None, 'error': None, 'activity_url': None}
+    return {'status': None, 'error': None, 'activity_results': None}
 
 @app.task(name='WorkR.calculate_occupancy_analysis',bind=True,soft_time_limit=82800)
 def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroups, groups, startDate, endDate,  window, siteCovs, detCovs, covOptions, user_id, user_folder, bucket, csv, timeToIndependence, timeToIndependenceUnit):
