@@ -63,7 +63,7 @@ def calculate_activity_pattern(self,task_ids,trapgroups,groups,species,baseUnit,
     ''' Calculates the activity patterns for a set of species with R'''
     try:
         pandas2ri.activate()
-        activity_url = None
+        activity_results = {}
         if task_ids:
             if task_ids[0] == '0':
                 tasks = db.session.query(Task.id, Task.survey_id).join(Survey).filter(Survey.user_id == user_id).filter(Task.name != 'default').filter(~Task.name.contains('_o_l_d_')).filter(~Task.name.contains('_copying')).group_by(Task.survey_id).order_by(Task.id).all()
@@ -172,14 +172,6 @@ def calculate_activity_pattern(self,task_ids,trapgroups,groups,species,baseUnit,
 
             if endDate: baseQuery = baseQuery.filter(Image.corrected_timestamp <= endDate)
 
-            # TODO: Look at group_by usage & check query results in general
-            # if baseUnit == '1' or baseUnit == '4':
-            #     baseQuery = baseQuery.filter(Image.corrected_timestamp != None).order_by(Image.corrected_timestamp).group_by(Image.id).all()
-            # elif baseUnit == '2':
-            #     baseQuery = baseQuery.filter(Image.corrected_timestamp != None).order_by(Image.corrected_timestamp).group_by(Cluster.id).all()
-            # elif baseUnit == '3':
-            #     baseQuery = baseQuery.filter(Image.corrected_timestamp != None).order_by(Image.corrected_timestamp).group_by(Detection.id).all()
-
             baseQuery = baseQuery.filter(Image.corrected_timestamp != None).order_by(Image.corrected_timestamp).all()
 
             df = pd.DataFrame(baseQuery, columns=['id','timestamp','label_id','species', 'tag', 'latitude','longitude'])
@@ -239,6 +231,10 @@ def calculate_activity_pattern(self,task_ids,trapgroups,groups,species,baseUnit,
                     s3client.put_object(Bucket=bucket,Key=fileName,Body=temp_file)
                     activity_url = "https://"+ bucket + ".s3.amazonaws.com/" + fileName
 
+                    activity_results = {
+                        'activity_url': activity_url
+                    }
+
                     # Schedule deletion
                     # deleteFile.apply_async(kwargs={'fileName': fileName}, countdown=21600)
 
@@ -261,15 +257,31 @@ def calculate_activity_pattern(self,task_ids,trapgroups,groups,species,baseUnit,
                             species_r = robjects.StrVector(species)
                         lat = robjects.FloatVector([lat])
                         lng = robjects.FloatVector([lng])
-                        r.calculate_activity_pattern(r_df,file_name,species_r,centre,unit,time,overlap,lat,lng,utc_offset_hours,tz)
+                        results = r.calculate_activity_pattern(r_df,file_name,species_r,centre,unit,time,overlap,lat,lng,utc_offset_hours,tz)
                         temp_file = open(temp_file.name, 'rb')
                         s3client.put_object(Bucket=bucket,Key=fileName,Body=temp_file)
                         activity_url = "https://"+ bucket + ".s3.amazonaws.com/" + fileName
 
+                        estimator = str(results.rx2('estimator')[0])
+                        sunrise = str(results.rx2('sunrise')[0])
+                        sunset = str(results.rx2('sunset')[0])
+
+                        activity_results = {
+                            'activity_url': activity_url,
+                            'estimator': estimator,
+                            'sunrise': sunrise,
+                            'sunset': sunset
+                        }
+
                         # Schedule deletion
                         # deleteFile.apply_async(kwargs={'fileName': fileName}, countdown=21600)
                 else:
-                    activity_url = None
+                    activity_results = {
+                        'activity_url': None,
+                        'estimator': '',
+                        'sunrise': '',
+                        'sunset': ''
+                    }
 
         status = 'SUCCESS'
         error = None
@@ -286,7 +298,7 @@ def calculate_activity_pattern(self,task_ids,trapgroups,groups,species,baseUnit,
     finally:
         db.session.remove()
 
-    return {'status': status, 'error': error, 'activity_url': activity_url}
+    return {'status': status, 'error': error, 'activity_results': activity_results}
 
 @app.task(name='WorkR.calculate_occupancy_analysis',bind=True,soft_time_limit=82800)
 def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroups, groups, startDate, endDate,  window, siteCovs, detCovs, covOptions, user_id, user_folder, bucket, csv, timeToIndependence, timeToIndependenceUnit):

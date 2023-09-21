@@ -27,6 +27,7 @@ calculate_activity_pattern <- function(data, file_name, species, centre, unit, t
   jpeg(file = file_name, quality = 100, width = 800, height = 800, units = "px", pointsize = 16)
 
   max_result <- 0
+  estimator <- "None"
 
   if (overlap == 'true' && length(species) == 2){
     dat1 <- dat[dat$species == species[1],]
@@ -60,15 +61,20 @@ calculate_activity_pattern <- function(data, file_name, species, centre, unit, t
 
     line_types <- c(1, 2)
 
-    e = overlapEst(time.rad1, time.rad2, kmax = 3, adjust=c(0.8, 1, 4), n.grid = 128,
-            type=c("all", "Dhat1", "Dhat4", "Dhat5"))
+    if (length(time.rad1) > 50 && length(time.rad2) > 50){
+      estimator = "Dhat4"
+    }
+    else{
+      estimator = "Dhat1"
+    }
 
-    average_e <- mean(e)
+    e = overlapEst(time.rad1, time.rad2, kmax = 3, adjust=c(0.8, 1, 4), n.grid = 128,
+            type=estimator)
 
     overlapPlot(time.rad1, time.rad2, xscale = 24, xcenter = overlap_centre,
               linetype = c(1, 2), linecol = c("black", "black"), linewidth = c(1, 1),
               olapcol = "lightgrey", rug=FALSE, extend=NULL,
-              n.grid = 128, kmax = 3, adjust = 1, main = paste("Overlap Estimate:", round(average_e, 2)))
+              n.grid = 128, kmax = 3, adjust = 1, main = paste("Overlap Estimate:", round(e, 2)))
 
     sunset = c()
     sunrise = c()
@@ -146,7 +152,9 @@ calculate_activity_pattern <- function(data, file_name, species, centre, unit, t
 
   dev.off()
   
-  return(file_name)
+  return_list <- list('file_name' = file_name, 'estimator' = estimator, 'sunrise' = sunrise_avg, 'sunset' = sunset_avg)
+
+  return (return_list)
 
 }
 
