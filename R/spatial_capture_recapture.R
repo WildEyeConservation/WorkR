@@ -160,7 +160,13 @@ spatial_capture_recapture <- function(edf, tdf, session_col, id_col, occ_col, tr
     resolution <- round(resolution, 1)
     buffer <- round(buffer, 1)
 
-    if (shapefile_path != 'None' || polygon_path != 'None'){
+    shapefile_path <- shapefile_path[1]
+    polygon_path <- polygon_path[1]
+
+    if (shapefile_path == 'None' && polygon_path == 'None'){
+        species.ss <- make.ssDF(species.sf, res=resolution, buff=buffer)
+    }
+    else{
         if (shapefile_path){
             shapefile <- read_sf(shapefile_path)
         }
@@ -179,9 +185,7 @@ spatial_capture_recapture <- function(edf, tdf, session_col, id_col, occ_col, tr
         state_space <- st_coordinates(points)
         species.ss <- data.frame(X = state_space[,1]/1000, Y = state_space[,2]/1000)
     }
-    else{
-        species.ss <- make.ssDF(species.sf, res=resolution, buff=buffer)
-    }
+
     print(species.ss)
     # 4. Create oSCR model object
     t <- mmdm * 3
