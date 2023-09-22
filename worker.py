@@ -947,6 +947,13 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                 shxfile_path = None
 
             if polygonGeoJSON:
+                # Convert coorinates to utm
+                for i in range(len(polygonGeoJSON['geometry']['coordinates'])):
+                    for j in range(len(polygonGeoJSON['geometry']['coordinates'][i])):
+                        utm_result = utm.from_latlon(polygonGeoJSON['geometry']['coordinates'][i][j][1], polygonGeoJSON['geometry']['coordinates'][i][j][0])
+                        polygonGeoJSON['geometry']['coordinates'][i][j][0] = utm_result[0]
+                        polygonGeoJSON['geometry']['coordinates'][i][j][1] = utm_result[1]
+
                 # Write polygonGeoJSON to R directory
                 polygonGeoJSON_dir = 'R/'
                 polygonGeoJSON_name = 'polygon.geojson'
