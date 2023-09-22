@@ -151,6 +151,10 @@ calculate_activity_pattern <- function(data, file_name, species, centre, unit, t
   }
 
   dev.off()
+
+  # Format sunrise and suset times
+  sunrise_avg <- format(as.POSIXct(sunrise_avg, origin = "1970-01-01", tz = tz), "%H:%M")
+  sunset_avg <- format(as.POSIXct(sunset_avg, origin = "1970-01-01", tz = tz), "%H:%M")
   
   return_list <- list('file_name' = file_name, 'estimator' = estimator, 'sunrise' = sunrise_avg, 'sunset' = sunset_avg)
 
