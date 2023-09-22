@@ -34,6 +34,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import tempfile
 import boto3
+import json
 
 REDIS_IP = os.environ.get('REDIS_IP') or '127.0.0.1'
 app = Celery('WorkR', broker='redis://'+REDIS_IP,backend='redis://'+REDIS_IP,broker_transport_options={'visibility_timeout': 86400},result_expires=86400,task_acks_late=True)
@@ -720,7 +721,7 @@ def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroup
     return { 'status': status, 'error': error, 'occupancy_results': occupancy_results }
 
 @app.task(name='WorkR.calculate_spatial_capture_recapture',bind=True,soft_time_limit=82800)
-def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgroups, groups, startDate, endDate, window, tags, siteCovs, covOptions, bucket, user_folder, csv=False):
+def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgroups, groups, startDate, endDate, window, tags, siteCovs, covOptions, bucket, user_folder, csv, shapefile, polygonGeoJSON):
     ''' Calculates spatial capture recapture for a given species in R '''	
     try:
         pandas2ri.activate()
@@ -923,6 +924,26 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
             individual_counts = individual_counts.to_dict(orient='records')
             individual_counts.append({'max_count': str(max_count)})
 
+            if shapefile:
+                # Write shape file to R directory
+                shapefile_dir = 'R/'
+                shapefile_name = 'shapefile.shp'
+                shapefile_path = shapefile_dir + shapefile_name
+                shapefile.to_file(shapefile_path)
+            else:
+                shapefile_path = None
+                shapefile_name = None
+
+            if polygonGeoJSON:
+                # Write polygonGeoJSON to R directory
+                polygonGeoJSON_dir = 'R/'
+                polygonGeoJSON_name = 'polygonGeoJSON.geojson'
+                polygonGeoJSON_path = polygonGeoJSON_dir + polygonGeoJSON_name
+                with open(polygonGeoJSON_path, 'w') as outfile:
+                    json.dump(polygonGeoJSON, outfile)
+            else:
+                polygonGeoJSON_path = None
+                polygonGeoJSON_name = None
 
             if csv:
                 dfs = [edf, tdf, df_dh]
