@@ -989,14 +989,14 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                 sep = '/'
 
                 if shapefile_path:
-                    shape_path = robjects.StrVector(shapefile_name)
+                    shape_path = shapefile_name
                 else:
-                    shape_path = robjects.StrVector('None')
+                    shape_path = 'None'
 
                 if polygonGeoJSON_path:
-                    polygon_path = robjects.StrVector(polygonGeoJSON_name)
+                    polygon_path = polygonGeoJSON_name
                 else:
-                    polygon_path = robjects.StrVector('None')
+                    polygon_path = 'None'
 
                 # Run the R function	
                 r = robjects.r
