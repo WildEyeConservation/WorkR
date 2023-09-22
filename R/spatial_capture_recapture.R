@@ -182,7 +182,8 @@ spatial_capture_recapture <- function(edf, tdf, session_col, id_col, occ_col, tr
         points <- sf::st_make_grid(shapefile, cellsize=cellsize, what="centers")
         points <- (points[grid])
         state_space <- st_coordinates(points)
-        species.ss <- data.frame(X = state_space[,1]/1000, Y = state_space[,2]/1000)
+        ss_df <- data.frame(X = state_space[,1]/1000, Y = state_space[,2]/1000)
+        species.ss <- list(ss_df)
     }
 
     print(species.ss)
