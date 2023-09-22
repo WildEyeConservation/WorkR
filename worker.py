@@ -35,6 +35,6 @@ def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroup
     return { 'status': None, 'error': None, 'occupancy_results': None }
 
 @app.task(name='WorkR.calculate_spatial_capture_recapture',bind=True,soft_time_limit=82800)
-def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgroups, groups, startDate, endDate, window, tags, siteCovs, covOptions, bucket, user_folder, csv=False):
+def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgroups, groups, startDate, endDate, window, tags, siteCovs, covOptions, bucket, user_folder, csv, shapefile, polygonGeoJSON):
     ''' Calculates spatial capture recapture for a given species in R '''	
     return { 'status': None, 'error': None, 'scr_results': None }
