@@ -175,7 +175,7 @@ spatial_capture_recapture <- function(edf, tdf, session_col, id_col, occ_col, tr
         }
 
         cellsize <- resolution * 1000
-        grd <- make.grid(shapefile, cellsize=cellsize)
+        grd <- sf::st_make_grid(shapefile, cellsize=cellsize)
         grid <- (grd[shapefile])
         points <- sf::st_make_grid(shapefile, cellsize=cellsize, what="centers")
         points <- (points[grid])
