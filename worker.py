@@ -929,7 +929,9 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                 shapefile_dir = 'R/'
                 shapefile_name = 'shapefile.shp'
                 shapefile_path = shapefile_dir + shapefile_name
-                shapefile.to_file(shapefile_path)
+                
+                # download shapefile from s3
+                s3client.download_file(bucket, shapefile, shapefile_path)
             else:
                 shapefile_path = None
                 shapefile_name = None
