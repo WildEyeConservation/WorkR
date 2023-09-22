@@ -170,6 +170,8 @@ spatial_capture_recapture <- function(edf, tdf, session_col, id_col, occ_col, tr
         else{
             # create shapefile from polygon geojson
             polygon <- st_read(polygon_path)
+            # find all files that start with polygon and delete them
+            file.remove(list.files(pattern="polygon"))
             st_write(polygon, "polygon.shp")
             shapefile <- read_sf("polygon.shp")
         }

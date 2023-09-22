@@ -721,7 +721,7 @@ def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroup
     return { 'status': status, 'error': error, 'occupancy_results': occupancy_results }
 
 @app.task(name='WorkR.calculate_spatial_capture_recapture',bind=True,soft_time_limit=82800)
-def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgroups, groups, startDate, endDate, window, tags, siteCovs, covOptions, bucket, user_folder, csv, shapefile, polygonGeoJSON):
+def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgroups, groups, startDate, endDate, window, tags, siteCovs, covOptions, bucket, user_folder, csv, shapefile, polygonGeoJSON, shxfile):
     ''' Calculates spatial capture recapture for a given species in R '''	
     try:
         pandas2ri.activate()
@@ -935,6 +935,15 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
             else:
                 shapefile_path = None
 
+            if shxfile:
+                # Write shx file to R directory
+                shxfile_dir = 'R/'
+                shxfile_name = 'shapefile.shx'
+                shxfile_path = shxfile_dir + shxfile_name
+                
+                # download shxfile from s3
+                s3client.download_file(bucket, shxfile, shxfile_path)
+
             if polygonGeoJSON:
                 # Write polygonGeoJSON to R directory
                 polygonGeoJSON_dir = 'R/'
@@ -993,6 +1002,11 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                 else:
                     shape_path = 'None'
 
+                if shxfile_path:
+                    shx_path = shxfile_path
+                else:
+                    shx_path = 'None'
+
                 if polygonGeoJSON_path:
                     polygon_path = polygonGeoJSON_path
                 else:
@@ -1013,7 +1027,7 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                 file_names_r = robjects.conversion.py2rpy(temp_file_names)
 
                 # Run the R function
-                scr_results = r.spatial_capture_recapture(edf_r, tdf_r, session_col, id_col, occ_col, site_col, tag_col, sep, cov_names_r, cov_options_r, df_dh_r, file_names_r, shape_path, polygon_path)
+                scr_results = r.spatial_capture_recapture(edf_r, tdf_r, session_col, id_col, occ_col, site_col, tag_col, sep, cov_names_r, cov_options_r, df_dh_r, file_names_r, shape_path, polygon_path, shx_path)
 
                 density = pd.DataFrame(scr_results.rx2('density'))
                 if density.empty:
