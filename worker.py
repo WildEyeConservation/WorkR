@@ -989,12 +989,12 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                 sep = '/'
 
                 if shapefile_path:
-                    shape_path = shapefile_name
+                    shape_path = shapefile_path
                 else:
                     shape_path = 'None'
 
                 if polygonGeoJSON_path:
-                    polygon_path = polygonGeoJSON_name
+                    polygon_path = polygonGeoJSON_path
                 else:
                     polygon_path = 'None'
 
