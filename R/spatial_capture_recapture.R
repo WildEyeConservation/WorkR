@@ -167,7 +167,7 @@ spatial_capture_recapture <- function(edf, tdf, session_col, id_col, occ_col, tr
         species.ss <- make.ssDF(species.sf, res=resolution, buff=buffer)
     }
     else{
-        if (shapefile_path){
+        if (shapefile_path != 'None'){
             shapefile <- read_sf(shapefile_path)
         }
         else{
