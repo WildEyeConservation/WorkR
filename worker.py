@@ -933,7 +933,7 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                 # download shapefile from s3
                 s3client.download_file(bucket, shapefile, shapefile_path)
             else:
-                shapefile_path = 'None'
+                shapefile_path = None
 
             if polygonGeoJSON:
                 # Write polygonGeoJSON to R directory
@@ -943,7 +943,7 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                 with open(polygonGeoJSON_path, 'w') as outfile:
                     json.dump(polygonGeoJSON, outfile)
             else:
-                polygonGeoJSON_path = 'None'
+                polygonGeoJSON_path = None
 
             if csv:
                 dfs = [edf, tdf, df_dh]
@@ -988,6 +988,16 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                     tag_col = 'none'
                 sep = '/'
 
+                if shapefile_path:
+                    shape_path = robjects.StrVector(shapefile_name)
+                else:
+                    shape_path = robjects.StrVector('None')
+
+                if polygonGeoJSON_path:
+                    polygon_path = robjects.StrVector(polygonGeoJSON_name)
+                else:
+                    polygon_path = robjects.StrVector('None')
+
                 # Run the R function	
                 r = robjects.r
                 r.source('R/spatial_capture_recapture.R')
@@ -1003,7 +1013,7 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                 file_names_r = robjects.conversion.py2rpy(temp_file_names)
 
                 # Run the R function
-                scr_results = r.spatial_capture_recapture(edf_r, tdf_r, session_col, id_col, occ_col, site_col, tag_col, sep, cov_names_r, cov_options_r, df_dh_r, file_names_r, shapefile_path, polygonGeoJSON_path)
+                scr_results = r.spatial_capture_recapture(edf_r, tdf_r, session_col, id_col, occ_col, site_col, tag_col, sep, cov_names_r, cov_options_r, df_dh_r, file_names_r, shape_path, polygon_path)
 
                 density = pd.DataFrame(scr_results.rx2('density'))
                 if density.empty:
