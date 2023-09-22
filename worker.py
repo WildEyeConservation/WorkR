@@ -943,6 +943,8 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                 
                 # download shxfile from s3
                 s3client.download_file(bucket, shxfile, shxfile_path)
+            else:
+                shxfile_path = None
 
             if polygonGeoJSON:
                 # Write polygonGeoJSON to R directory
