@@ -933,19 +933,17 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                 # download shapefile from s3
                 s3client.download_file(bucket, shapefile, shapefile_path)
             else:
-                shapefile_path = None
-                shapefile_name = None
+                shapefile_path = 'None'
 
             if polygonGeoJSON:
                 # Write polygonGeoJSON to R directory
                 polygonGeoJSON_dir = 'R/'
-                polygonGeoJSON_name = 'polygonGeoJSON.geojson'
+                polygonGeoJSON_name = 'polygon.geojson'
                 polygonGeoJSON_path = polygonGeoJSON_dir + polygonGeoJSON_name
                 with open(polygonGeoJSON_path, 'w') as outfile:
                     json.dump(polygonGeoJSON, outfile)
             else:
-                polygonGeoJSON_path = None
-                polygonGeoJSON_name = None
+                polygonGeoJSON_path = 'None'
 
             if csv:
                 dfs = [edf, tdf, df_dh]
@@ -1005,7 +1003,7 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                 file_names_r = robjects.conversion.py2rpy(temp_file_names)
 
                 # Run the R function
-                scr_results = r.spatial_capture_recapture(edf_r, tdf_r, session_col, id_col, occ_col, site_col, tag_col, sep, cov_names_r, cov_options_r, df_dh_r, file_names_r)
+                scr_results = r.spatial_capture_recapture(edf_r, tdf_r, session_col, id_col, occ_col, site_col, tag_col, sep, cov_names_r, cov_options_r, df_dh_r, file_names_r, shapefile_path, polygonGeoJSON_path)
 
                 density = pd.DataFrame(scr_results.rx2('density'))
                 if density.empty:

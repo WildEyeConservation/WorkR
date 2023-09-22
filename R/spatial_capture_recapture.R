@@ -24,7 +24,7 @@ library(Rcapture)
 
 trim <-0
 
-spatial_capture_recapture <- function(edf, tdf, session_col, id_col, occ_col, trap_col, tag_col, sep, cov_names, cov_options, dh, file_names){
+spatial_capture_recapture <- function(edf, tdf, session_col, id_col, occ_col, trap_col, tag_col, sep, cov_names, cov_options, dh, file_names, shapefile_path, polygon_path){
 
     message = ''
     # 0. Rcapture
@@ -159,8 +159,30 @@ spatial_capture_recapture <- function(edf, tdf, session_col, id_col, occ_col, tr
     resolution <- hmmdm / 2
     resolution <- round(resolution, 1)
     buffer <- round(buffer, 1)
-    species.ss <- make.ssDF(species.sf, res=resolution, buff=buffer)
 
+    if (shapefile_path != 'None' || polygon_path != 'None'){
+        if (shapefile_path){
+            shapefile <- read_sf(shapefile_path)
+        }
+        else{
+            # create shapefile from polygon geojson
+            polygon <- st_read(polygon_path)
+            st_write(polygon, "polygon.shp")
+            shapefile <- read_sf("polygon.shp")
+        }
+
+        cellsize <- resolution * 1000
+        grd <- make.grid(shapefile, cellsize=cellsize)
+        grid <- (grd[shapefile])
+        points <- sf::st_make_grid(shapefile, cellsize=cellsize, what="centers")
+        points <- (points[grid])
+        state_space <- st_coordinates(points)
+        species.ss <- data.frame(X = state_space[,1]/1000, Y = state_space[,2]/1000)
+    }
+    else{
+        species.ss <- make.ssDF(species.sf, res=resolution, buff=buffer)
+    }
+    print(species.ss)
     # 4. Create oSCR model object
     t <- mmdm * 3
     # Always round up
