@@ -401,24 +401,21 @@ spatial_capture_recapture <- function(edf, tdf, session_col, id_col, occ_col, tr
         dev.off()
 
         # 7.2 State-space
-        if (shapefile != NULL){
-            file_name <- paste0(file_names[2], ".JPG")
-            jpeg(file = file_name, quality = 100, width = 800, height = 800, units = "px", pointsize = 16)
+        file_name <- paste0(file_names[2], ".JPG")
+        jpeg(file = file_name, quality = 100, width = 800, height = 800, units = "px", pointsize = 16)
+        if (is.null(shapefile)){
+            plot(species.ss, species.sf)
+            text(species.sf$traps[[1]], labels=labs, pos=3)
+        }
+        else{
             plot(st_geometry(shapefile), lwd = 2, col = "white")
             plot(grid, add = TRUE) 
             plot(points, cex = 0.2, add=TRUE)
             traps <- species.sf$traps[[1]] * 1000
             points(traps, pch = 19)
             text(traps, labels = labs, pos = 3, offset = 0.5)
-            dev.off()
         }
-        else{
-            file_name <- paste0(file_names[2], ".JPG")
-            jpeg(file = file_name, quality = 100, width = 800, height = 800, units = "px", pointsize = 16)
-            plot(species.ss, species.sf)
-            text(species.sf$traps[[1]], labels=labs, pos=3)
-            dev.off()
-        }
+        dev.off()
 
         # 7.3 Density Map
         file_name <- paste0(file_names[3], ".JPG")
@@ -508,8 +505,20 @@ get_scr <-function(){
     # Get file names for plots
     file_names <- c("Captures", "State_space", "Density_map")
 
+    # Specify shapefile path or polygon path to mask state space (optional)
+    # Shapefile path
+    shapefile_path <- 'None'
+    # Polygon path
+    polygon_path <- 'None'
+
+    # Specify zone number and hemisphere for UTM coordinates (only used for polygon)
+    # Zone number (UTM) 
+    zone_number <- 33
+    # Hemisphere
+    hemisphere <- 'S'
+
     # Run function
-    result <- spatial_capture_recapture(edf, tdf, session_col, id_col, occ_col, trap_col, tag_col, sep, cov_names, cov_options, dh, file_names)
+    result <- spatial_capture_recapture(edf, tdf, session_col, id_col, occ_col, trap_col, tag_col, sep, cov_names, cov_options, dh, file_names, shapefile_path, polygon_path, zone_number, hemisphere)
 
     return (result)
 }
