@@ -193,6 +193,7 @@ spatial_capture_recapture <- function(edf, tdf, session_col, id_col, occ_col, tr
         species.ss <- list(ss_df)
     }
 
+    print(species.sf)
     print(species.ss)
     # 4. Create oSCR model object
     t <- mmdm * 3
@@ -204,6 +205,7 @@ spatial_capture_recapture <- function(edf, tdf, session_col, id_col, occ_col, tr
     m0 <- NULL
     tryCatch({
         m0 <- oSCR.fit(list(D~1,p0~1,sig~1), species.sf, species.ss, trimS=trim)
+        print(m0)
     }, error = function(e){
         print(e)
         message <- 'Model failed to fit. '
