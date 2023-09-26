@@ -201,7 +201,7 @@ spatial_capture_recapture <- function(edf, tdf, session_col, id_col, occ_col, tr
             min_index <- which.min(distances)
             min_distance <- distances[min_index]
             if (min_distance > resolution){
-                message <- paste(message, 'One or more sites are outside the state-space. Please ensure that the state-space includes all sites or filter out sites that are outside the state-space and try again.')
+                message <- paste(message, 'One or more sites are outside the selected state-space. Please ensure that the state-space includes all sites or filter out sites that are outside of the state-space and try again.')
                 return (list(density = data.frame(), abundance = data.frame(), det_prob = data.frame(), sigma = data.frame(), summary = summary_df, aic = data.frame(), cr = cr, message = message, raster_df = data.frame(), sites_density = data.frame()))
             }
         }
@@ -213,7 +213,7 @@ spatial_capture_recapture <- function(edf, tdf, session_col, id_col, occ_col, tr
         if (area_ss > area_ss_buf * 1.10){
             species.ss <- ss_buf
             shapefile <- NULL
-            message <- paste(message, 'The masked state-space is too large (too much computation time). The unmasked state-space will be used instead.')
+            message <- paste(message, 'The selected (masked) state-space is too large. The computation time will be very long. The state-space calculated by default will be used instead.')
         }
 
     }
