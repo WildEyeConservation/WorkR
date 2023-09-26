@@ -821,6 +821,10 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
             utm_mean = utm.from_latlon(sites_df['latitude'].mean(), sites_df['longitude'].mean())
             zone_number = utm_mean[2]
             grid_zone = utm_mean[3]
+            if sites_df['latitude'].mean() < 0:
+                hemisphere = 'S'
+            else:
+                hemisphere = 'N'
 
             # Add a date column
             individuals_df['date'] = individuals_df['timestamp'].dt.date
@@ -947,13 +951,6 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                 shxfile_path = None
 
             if polygonGeoJSON:
-                # Convert coorinates to utm
-                for i in range(len(polygonGeoJSON['geometry']['coordinates'])):
-                    for j in range(len(polygonGeoJSON['geometry']['coordinates'][i])):
-                        utm_result = utm.from_latlon(polygonGeoJSON['geometry']['coordinates'][i][j][1], polygonGeoJSON['geometry']['coordinates'][i][j][0])
-                        polygonGeoJSON['geometry']['coordinates'][i][j][0] = utm_result[0]
-                        polygonGeoJSON['geometry']['coordinates'][i][j][1] = utm_result[1]
-
                 # Write polygonGeoJSON to R directory
                 polygonGeoJSON_dir = 'R/'
                 polygonGeoJSON_name = 'polygon.geojson'
@@ -1036,7 +1033,7 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                 file_names_r = robjects.conversion.py2rpy(temp_file_names)
 
                 # Run the R function
-                scr_results = r.spatial_capture_recapture(edf_r, tdf_r, session_col, id_col, occ_col, site_col, tag_col, sep, cov_names_r, cov_options_r, df_dh_r, file_names_r, shape_path, polygon_path, shx_path)
+                scr_results = r.spatial_capture_recapture(edf_r, tdf_r, session_col, id_col, occ_col, site_col, tag_col, sep, cov_names_r, cov_options_r, df_dh_r, file_names_r, shape_path, polygon_path, shx_path, zone_number, hemisphere)
 
                 density = pd.DataFrame(scr_results.rx2('density'))
                 if density.empty:

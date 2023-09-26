@@ -24,7 +24,7 @@ library(Rcapture)
 
 trim <-0
 
-spatial_capture_recapture <- function(edf, tdf, session_col, id_col, occ_col, trap_col, tag_col, sep, cov_names, cov_options, dh, file_names, shapefile_path, polygon_path, shx_path){
+spatial_capture_recapture <- function(edf, tdf, session_col, id_col, occ_col, trap_col, tag_col, sep, cov_names, cov_options, dh, file_names, shapefile_path, polygon_path, shx_path, zone_number, hemisphere){
 
     message = ''
     # 0. Rcapture
@@ -174,6 +174,13 @@ spatial_capture_recapture <- function(edf, tdf, session_col, id_col, occ_col, tr
             file.remove(list.files(pattern="polygon"))
             st_write(polygon, "polygon.shp")
             shapefile <- read_sf("polygon.shp")
+            if (hemisphere == 'N') {
+                target_crs <- st_crs(paste0("+proj=utm +zone=", zone_number, " +datum=WGS84 +units=m +no_defs"))
+            } else {
+                target_crs <- st_crs(paste0("+proj=utm +zone=", zone_number, " +south +datum=WGS84 +units=m +no_defs"))
+            }
+            shapefile <- st_transform(shapefile, crs=target_crs)
+
         }
 
         cellsize <- resolution * 1000
