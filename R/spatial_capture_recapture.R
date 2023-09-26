@@ -189,12 +189,10 @@ spatial_capture_recapture <- function(edf, tdf, session_col, id_col, occ_col, tr
         points <- sf::st_make_grid(shapefile, cellsize=cellsize, what="centers")
         points <- (points[grid])
         state_space <- st_coordinates(points)
-        ss_df <- data.frame(X = state_space[,1]/1000, Y = state_space[,2]/1000)
+        ss_df <- data.frame(X = state_space[,1]/1000, Y = state_space[,2]/1000, Tr = 1)
         species.ss <- list(ss_df)
     }
 
-    print(species.sf)
-    print(species.ss)
     # 4. Create oSCR model object
     t <- mmdm * 3
     # Always round up
@@ -205,7 +203,6 @@ spatial_capture_recapture <- function(edf, tdf, session_col, id_col, occ_col, tr
     m0 <- NULL
     tryCatch({
         m0 <- oSCR.fit(list(D~1,p0~1,sig~1), species.sf, species.ss, trimS=trim)
-        print(m0)
     }, error = function(e){
         print(e)
         message <- 'Model failed to fit. '
@@ -379,11 +376,24 @@ spatial_capture_recapture <- function(edf, tdf, session_col, id_col, occ_col, tr
         dev.off()
 
         # 7.2 State-space (spider)
-        file_name <- paste0(file_names[2], ".JPG")
-        jpeg(file = file_name, quality = 100, width = 800, height = 800, units = "px", pointsize = 16)
-        plot(species.ss, species.sf, spider=TRUE)
-        text(species.sf$traps[[1]], labels=labs, pos=3)
-        dev.off()
+        if (shapefile_path == 'None' && polygon_path == 'None'){
+            file_name <- paste0(file_names[2], ".JPG")
+            jpeg(file = file_name, quality = 100, width = 800, height = 800, units = "px", pointsize = 16)
+            plot(species.ss, species.sf, spider=TRUE)
+            text(species.sf$traps[[1]], labels=labs, pos=3)
+            dev.off()
+        }
+        else{
+            file_name <- paste0(file_names[2], ".JPG")
+            jpeg(file = file_name, quality = 100, width = 800, height = 800, units = "px", pointsize = 16)
+            plot(st_geometry(shapefile), lwd = 2, col = "white")
+            plot(grid, add = TRUE) 
+            plot(points, cex = 0.2, add=TRUE)
+            traps <- species.sf$traps[[1]] * 1000
+            points(traps, pch = 19)
+            text(traps, labels = labs, pos = 3, offset = 0.5)
+            dev.off()
+        }
 
         # 7.3 Density Map
         file_name <- paste0(file_names[3], ".JPG")
