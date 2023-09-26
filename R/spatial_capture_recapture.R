@@ -379,7 +379,7 @@ spatial_capture_recapture <- function(edf, tdf, session_col, id_col, occ_col, tr
         if (shapefile_path == 'None' && polygon_path == 'None'){
             file_name <- paste0(file_names[2], ".JPG")
             jpeg(file = file_name, quality = 100, width = 800, height = 800, units = "px", pointsize = 16)
-            plot(species.ss, species.sf, spider=TRUE)
+            plot(species.ss, species.sf)
             text(species.sf$traps[[1]], labels=labs, pos=3)
             dev.off()
         }
