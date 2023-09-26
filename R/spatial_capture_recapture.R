@@ -159,18 +159,19 @@ spatial_capture_recapture <- function(edf, tdf, session_col, id_col, occ_col, tr
     resolution <- hmmdm / 2
     resolution <- round(resolution, 1)
     buffer <- round(buffer, 1)
-
+    shapefile <- NULL
     if (shapefile_path == 'None' && polygon_path == 'None'){
         species.ss <- make.ssDF(species.sf, res=resolution, buff=buffer)
     }
     else{
+        ss_buf <- make.ssDF(species.sf, res=resolution, buff=buffer)
+
         if (shapefile_path != 'None'){
             shapefile <- read_sf(shapefile_path)
         }
         else{
             # create shapefile from polygon geojson
             polygon <- st_read(polygon_path)
-            # find all files that start with polygon and delete them
             file.remove(list.files(pattern="polygon"))
             st_write(polygon, "polygon.shp")
             shapefile <- read_sf("polygon.shp")
@@ -191,6 +192,30 @@ spatial_capture_recapture <- function(edf, tdf, session_col, id_col, occ_col, tr
         state_space <- st_coordinates(points)
         ss_df <- data.frame(X = state_space[,1]/1000, Y = state_space[,2]/1000, Tr = 1)
         species.ss <- list(ss_df)
+
+        # Check if all sites are within the state-space
+        for (i in 1:nrow(tdf)){
+            site_x <- tdf[i,2]
+            site_y <- tdf[i,3]
+            distances <- sqrt((ss_df$X - site_x)^2 + (ss_df$Y - site_y)^2)
+            min_index <- which.min(distances)
+            min_distance <- distances[min_index]
+            if (min_distance > resolution){
+                message <- paste(message, 'One or more sites are outside the state-space. Please ensure that the state-space includes all sites or filter out sites that are outside the state-space and try again.')
+                return (list(density = data.frame(), abundance = data.frame(), det_prob = data.frame(), sigma = data.frame(), summary = summary_df, aic = data.frame(), cr = cr, message = message, raster_df = data.frame(), sites_density = data.frame()))
+            }
+        }
+
+        # Check if state-space is too large
+        area_ss_buf <- resolution^2 * nrow(ss_buf[[1]])
+        area_ss <- resolution^2 * nrow(ss_df)
+
+        if (area_ss > area_ss_buf * 1.10){
+            species.ss <- ss_buf
+            shapefile <- NULL
+            message <- paste(message, 'The masked state-space is too large (too much computation time). The unmasked state-space will be used instead.')
+        }
+
     }
 
     # 4. Create oSCR model object
@@ -375,15 +400,8 @@ spatial_capture_recapture <- function(edf, tdf, session_col, id_col, occ_col, tr
         text(species.sf$traps[[1]], labels=labs, pos=3)
         dev.off()
 
-        # 7.2 State-space (spider)
-        if (shapefile_path == 'None' && polygon_path == 'None'){
-            file_name <- paste0(file_names[2], ".JPG")
-            jpeg(file = file_name, quality = 100, width = 800, height = 800, units = "px", pointsize = 16)
-            plot(species.ss, species.sf)
-            text(species.sf$traps[[1]], labels=labs, pos=3)
-            dev.off()
-        }
-        else{
+        # 7.2 State-space
+        if (shapefile){
             file_name <- paste0(file_names[2], ".JPG")
             jpeg(file = file_name, quality = 100, width = 800, height = 800, units = "px", pointsize = 16)
             plot(st_geometry(shapefile), lwd = 2, col = "white")
@@ -392,6 +410,13 @@ spatial_capture_recapture <- function(edf, tdf, session_col, id_col, occ_col, tr
             traps <- species.sf$traps[[1]] * 1000
             points(traps, pch = 19)
             text(traps, labels = labs, pos = 3, offset = 0.5)
+            dev.off()
+        }
+        else{
+            file_name <- paste0(file_names[2], ".JPG")
+            jpeg(file = file_name, quality = 100, width = 800, height = 800, units = "px", pointsize = 16)
+            plot(species.ss, species.sf)
+            text(species.sf$traps[[1]], labels=labs, pos=3)
             dev.off()
         }
 
