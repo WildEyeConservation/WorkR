@@ -401,7 +401,7 @@ spatial_capture_recapture <- function(edf, tdf, session_col, id_col, occ_col, tr
         dev.off()
 
         # 7.2 State-space
-        if (shapefile){
+        if (shapefile != NULL){
             file_name <- paste0(file_names[2], ".JPG")
             jpeg(file = file_name, quality = 100, width = 800, height = 800, units = "px", pointsize = 16)
             plot(st_geometry(shapefile), lwd = 2, col = "white")
