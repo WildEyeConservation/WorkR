@@ -213,7 +213,7 @@ spatial_capture_recapture <- function(edf, tdf, session_col, id_col, occ_col, tr
         if (area_ss > area_ss_buf * 1.10){
             species.ss <- ss_buf
             shapefile <- NULL
-            message <- paste(message, 'The selected (masked) state-space is too large. The computation time will be very long. The state-space calculated by default will be used instead.')
+            message <- paste(message, 'The selected (masked) state-space is too large. A large state-space may cause very long computation times. The state-space has been set to the default state-space. Please ensure that the state-space is not too large and try again.')
         }
 
     }
