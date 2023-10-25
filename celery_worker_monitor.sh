@@ -1,4 +1,4 @@
-#!/bin/bash
+\#!/bin/bash
 
 # WorkR
 # Copyright (C) 2023
@@ -25,7 +25,8 @@
 } || {
   exit 100
 }
-if grep -q "empty" <<< "$RESPONSE"; then
+PATTERN="celery@'"$1"': OK"$'\n'"    - empty -"
+if grep -q "$PATTERN" <<< "$RESPONSE"; then
   exit 23
 fi
 exit 50
