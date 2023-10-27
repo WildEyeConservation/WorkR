@@ -59,17 +59,39 @@ def getChildList(label,task_id):
             label_list.extend(getChildList(lab,task_id))
     return label_list
 
+def surveyPermissionsSQ(sq,user_id,requiredPermission):
+    '''Adds the necessary SQLAlchemy filters to check if a user has the required permission for a survey.'''
+    allPermissions = ['hidden','read','write','admin']
+    requiredPermissions = allPermissions[allPermissions.index(requiredPermission):]
+    ShareOrganisation = alias(Organisation)
+    ShareUserPermissions = alias(UserPermissions)
+    return sq.join(Organisation,Survey.organisation_id==Organisation.id)\
+                .outerjoin(UserPermissions,UserPermissions.organisation_id==Organisation.id)\
+                .outerjoin(SurveyShare,SurveyShare.survey_id==Survey.id)\
+                .outerjoin(ShareOrganisation,ShareOrganisation.c.id==SurveyShare.organisation_id)\
+                .outerjoin(ShareUserPermissions,ShareUserPermissions.c.organisation_id==ShareOrganisation.c.id)\
+                .outerjoin(SurveyPermissionException,SurveyPermissionException.survey_id==Survey.id)\
+                .filter(or_(
+                    # Organisation member has default permission
+                    and_(UserPermissions.user_id==user_id,UserPermissions.default.in_(requiredPermissions),or_(SurveyPermissionException.id==None,SurveyPermissionException.user_id!=user_id)),
+                    # Share organisation member has default permission
+                    and_(ShareUserPermissions.c.user_id==user_id,ShareUserPermissions.c.default.in_(requiredPermissions),SurveyShare.permission.in_(requiredPermissions),or_(SurveyPermissionException.id==None,SurveyPermissionException.user_id!=user_id)),
+                    # There is an exception for the survey (organisation member or share organisation)
+                    and_(SurveyPermissionException.user_id==user_id,SurveyPermissionException.permission.in_(requiredPermissions))
+                ))
+
 @app.task(name='WorkR.calculate_activity_pattern',bind=True,soft_time_limit=82800)
-def calculate_activity_pattern(self,task_ids,trapgroups,groups,species,baseUnit,user_id,startDate,endDate,unit,centre,time,overlap, bucket, user_folder, csv, timeToIndependence, timeToIndependenceUnit):
+def calculate_activity_pattern(self,task_ids,trapgroups,groups,species,baseUnit,user_id,startDate,endDate,unit,centre,time,overlap, bucket, folder, csv, timeToIndependence, timeToIndependenceUnit):
     ''' Calculates the activity patterns for a set of species with R'''
     try:
         pandas2ri.activate()
         activity_results = {}
+        user_name = db.session.query(User.username).filter(User.id==user_id).first()[0]
         if task_ids:
             if task_ids[0] == '0':
-                tasks = db.session.query(Task.id, Task.survey_id).join(Survey).filter(Survey.user_id == user_id).filter(Task.name != 'default').filter(~Task.name.contains('_o_l_d_')).filter(~Task.name.contains('_copying')).group_by(Task.survey_id).order_by(Task.id).all()
+                tasks = surveyPermissionsSQ(db.session.query(Task.id, Task.survey_id).join(Survey).filter(Task.name != 'default').filter(~Task.name.contains('_o_l_d_')).filter(~Task.name.contains('_copying')).group_by(Task.survey_id).order_by(Task.id), user_id, 'read').distinct().all()
             else:
-                tasks = db.session.query(Task.id, Task.survey_id).join(Survey).filter(Survey.user_id==user_id).filter(Task.id.in_(task_ids)).all()
+                tasks = surveyPermissionsSQ(db.session.query(Task.id, Task.survey_id).join(Survey).filter(Task.id.in_(task_ids)), user_id, 'read').distinct().all()
             task_ids = [r[0] for r in tasks]
             survey_ids = list(set([r[1] for r in tasks]))
 
@@ -225,7 +247,7 @@ def calculate_activity_pattern(self,task_ids,trapgroups,groups,species,baseUnit,
                 # Convert to CSV and upload to bucket
                 with tempfile.NamedTemporaryFile(delete=True, suffix='.csv') as temp_file:
                     df.to_csv(temp_file.name,index=False)
-                    fileName = user_folder+'/docs/' + 'Activity_Pattern_CSV'
+                    fileName = folder+'/docs/'+ user_name + '_Activity_Pattern_CSV'
                     for specie in species:
                         fileName += '_' + specie
                     fileName += '.csv'
@@ -247,7 +269,7 @@ def calculate_activity_pattern(self,task_ids,trapgroups,groups,species,baseUnit,
                     r.source('R/activity_pattern.R')
 
                     with tempfile.NamedTemporaryFile(delete=True, suffix='.JPG') as temp_file:
-                        fileName = user_folder+'/docs/' + 'Activity_Pattern' 
+                        fileName = folder+'/docs/' + user_name + '_Activity_Pattern' 
                         for specie in species:
                             fileName += '_' + specie
                         fileName += '_' + datetime.now().strftime('%Y-%m-%d_%H:%M:%S') + '.JPG'
@@ -302,17 +324,17 @@ def calculate_activity_pattern(self,task_ids,trapgroups,groups,species,baseUnit,
     return {'status': status, 'error': error, 'activity_results': activity_results}
 
 @app.task(name='WorkR.calculate_occupancy_analysis',bind=True,soft_time_limit=82800)
-def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroups, groups, startDate, endDate,  window, siteCovs, detCovs, covOptions, user_id, user_folder, bucket, csv, timeToIndependence, timeToIndependenceUnit):
+def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroups, groups, startDate, endDate,  window, siteCovs, detCovs, covOptions, user_id, folder, bucket, csv, timeToIndependence, timeToIndependenceUnit):
     ''' Calculates occupancy analysis'''
     try:
         pandas2ri.activate()
         occupancy_results = {}
-
+        user_name = db.session.query(User.username).filter(User.id==user_id).first()[0]
         if task_ids:
             if task_ids[0] == '0':
-                tasks = db.session.query(Task.id, Task.survey_id).join(Survey).filter(Survey.user_id == user_id).filter(Task.name != 'default').filter(~Task.name.contains('_o_l_d_')).filter(~Task.name.contains('_copying')).group_by(Task.survey_id).order_by(Task.id).all()
+                tasks = surveyPermissionsSQ(db.session.query(Task.id, Task.survey_id).join(Survey).filter(Task.name != 'default').filter(~Task.name.contains('_o_l_d_')).filter(~Task.name.contains('_copying')).group_by(Task.survey_id).order_by(Task.id), user_id, 'read').distinct().all()
             else:
-                tasks = db.session.query(Task.id, Task.survey_id).join(Survey).filter(Survey.user_id == user_id).filter(Task.id.in_(task_ids)).all()
+                tasks = surveyPermissionsSQ(db.session.query(Task.id, Task.survey_id).join(Survey).filter(Task.id.in_(task_ids)), user_id, 'read').distinct().all()
 
             task_ids = [r[0] for r in tasks]
             survey_ids = list(set([r[1] for r in tasks]))
@@ -553,7 +575,7 @@ def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroup
                             df.to_csv(temp_file.name, index=True)
                         else:
                             df.to_csv(temp_file.name, index=False)
-                        fileName = user_folder+'/docs/' + 'Occupancy' + '_' + species + '_' + df_name + '.csv'
+                        fileName = folder+'/docs/' + user_name + '_Occupancy' + '_' + species + '_' + df_name + '.csv'
                         s3client.put_object(Bucket=bucket,Key=fileName,Body=temp_file)
                         occupancy_url = "https://"+ bucket + ".s3.amazonaws.com/" + fileName
                         print(occupancy_url)
@@ -616,7 +638,7 @@ def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroup
                             occu['images'] = []
                             for j in range(nr_plots):
                                 with tempfile.NamedTemporaryFile(delete=True, suffix='.JPG') as temp_file:
-                                    fileName = user_folder+'/docs/' + 'Occupancy' + '_' + species + '_' + best_model_cov_names[i] + '_' + str(j+1)
+                                    fileName = folder+'/docs/' + user_name + '_Occupancy' + '_' + species + '_' + best_model_cov_names[i] + '_' + str(j+1)
                                     fileName += '_' + datetime.now().strftime('%Y-%m-%d_%H:%M:%S') + '.JPG'
                                     file_name = temp_file.name.split('.JPG')[0]
                                     pred = r.plot_occupancy(j+1, file_name, best_model_cov_names[i])
@@ -649,7 +671,7 @@ def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroup
                             occu['images'] = []
                             for j in range(nr_plots):
                                 with tempfile.NamedTemporaryFile(delete=True, suffix='.JPG') as temp_file:
-                                    fileName = user_folder+'/docs/' + 'Occupancy' + '_' + species + '_' + model_name + '_' + str(j+1)
+                                    fileName = folder+'/docs/'+ user_name + '_Occupancy' + '_' + species + '_' + model_name + '_' + str(j+1)
                                     fileName += '_' + datetime.now().strftime('%Y-%m-%d_%H:%M:%S') + '.JPG'
                                     file_name = temp_file.name.split('.JPG')[0]
                                     pred = r.plot_occupancy(j+1, file_name, model_name)
@@ -721,7 +743,7 @@ def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroup
     return { 'status': status, 'error': error, 'occupancy_results': occupancy_results }
 
 @app.task(name='WorkR.calculate_spatial_capture_recapture',bind=True,soft_time_limit=82800)
-def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgroups, groups, startDate, endDate, window, tags, siteCovs, covOptions, bucket, user_folder, csv, shapefile, polygonGeoJSON, shxfile):
+def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgroups, groups, startDate, endDate, window, tags, siteCovs, covOptions, bucket, folder, csv, shapefile, polygonGeoJSON, shxfile):
     ''' Calculates spatial capture recapture for a given species in R '''	
     try:
         pandas2ri.activate()
@@ -729,12 +751,12 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
         status = None
         error = None
         temp_files = []
-
+        user_name = db.session.query(User.username).filter(User.id==user_id).first()[0]
         if task_ids:
             if task_ids[0] == '0':
-                tasks = db.session.query(Task.id, Task.survey_id).join(Survey).filter(Survey.user_id == user_id).filter(Task.name != 'default').filter(~Task.name.contains('_o_l_d_')).filter(~Task.name.contains('_copying')).group_by(Task.survey_id).order_by(Task.id).all()
+                tasks = surveyPermissionsSQ(db.session.query(Task.id, Task.survey_id).join(Survey).filter(Task.name != 'default').filter(~Task.name.contains('_o_l_d_')).filter(~Task.name.contains('_copying')).group_by(Task.survey_id).order_by(Task.id), user_id, 'read').distinct().all()
             else:
-                tasks = db.session.query(Task.id, Task.survey_id).join(Survey).filter(Survey.user_id == user_id).filter(Task.id.in_(task_ids)).all()
+                tasks = surveyPermissionsSQ(db.session.query(Task.id, Task.survey_id).join(Survey).filter(Task.id.in_(task_ids)), user_id, 'read').distinct().all()
 
             task_ids = [r[0] for r in tasks]
             survey_ids = list(set([r[1] for r in tasks]))
@@ -969,7 +991,7 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                         df = dfs[i]
                         df_name = dfs_names[i]
                         df.to_csv(temp_file.name, index=False)
-                        fileName = user_folder+'/docs/' + 'SCR' + '_' 
+                        fileName = folder+'/docs/'+ user_name + '_SCR_' 
                         for specie in species:
                             fileName += specie + '_'
                         fileName += df_name + '.csv'
@@ -1128,7 +1150,7 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                 # Upload the files to S3
                 scr_files = []
                 for i in range(len(plots)):
-                    fileName = user_folder+'/docs/' + 'SCR_' + plots[i] + '_' + datetime.now().strftime('%Y-%m-%d_%H:%M:%S') + '.JPG'
+                    fileName = folder+'/docs/' + user_name + '_SCR_' + plots[i] + '_' + datetime.now().strftime('%Y-%m-%d_%H:%M:%S') + '.JPG'
                     temp_file = open(temp_files[i].name, 'rb')
                     s3client.put_object(Bucket=bucket,Key=fileName,Body=temp_file)
                     scr_files.append("https://"+ bucket + ".s3.amazonaws.com/" + fileName)
