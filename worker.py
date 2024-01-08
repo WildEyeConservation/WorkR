@@ -59,23 +59,27 @@ def getChildList(label,task_id):
             label_list.extend(getChildList(lab,task_id))
     return label_list
 
-def surveyPermissionsSQ(sq,user_id,requiredPermission):
+def surveyPermissionsSQ(sq,user_id,requiredPermission,aliasPermission=None):
     '''Adds the necessary SQLAlchemy filters to check if a user has the required permission for a survey.'''
-    allPermissions = ['hidden','read','write','admin']
+    allPermissions = ['worker','hidden','read','write','admin']
     requiredPermissions = allPermissions[allPermissions.index(requiredPermission):]
     ShareOrganisation = alias(Organisation)
-    ShareUserPermissions = alias(UserPermissions)
+    if aliasPermission != None:
+        ShareUserPermissions = aliasPermission
+    else:
+        ShareUserPermissions = alias(UserPermissions)
+
     return sq.join(Organisation,Survey.organisation_id==Organisation.id)\
-                .outerjoin(UserPermissions,UserPermissions.organisation_id==Organisation.id)\
+                .outerjoin(UserPermissions,and_(UserPermissions.organisation_id==Organisation.id,UserPermissions.user_id==user_id))\
                 .outerjoin(SurveyShare,SurveyShare.survey_id==Survey.id)\
                 .outerjoin(ShareOrganisation,ShareOrganisation.c.id==SurveyShare.organisation_id)\
-                .outerjoin(ShareUserPermissions,ShareUserPermissions.c.organisation_id==ShareOrganisation.c.id)\
-                .outerjoin(SurveyPermissionException,SurveyPermissionException.survey_id==Survey.id)\
+                .outerjoin(ShareUserPermissions,and_(ShareUserPermissions.c.organisation_id==ShareOrganisation.c.id,ShareUserPermissions.c.user_id==user_id))\
+                .outerjoin(SurveyPermissionException,and_(SurveyPermissionException.survey_id==Survey.id,SurveyPermissionException.user_id==user_id))\
                 .filter(or_(
                     # Organisation member has default permission
-                    and_(UserPermissions.user_id==user_id,UserPermissions.default.in_(requiredPermissions),or_(SurveyPermissionException.id==None,SurveyPermissionException.user_id!=user_id)),
+                    and_(UserPermissions.user_id==user_id,UserPermissions.default.in_(requiredPermissions),SurveyPermissionException.id==None),
                     # Share organisation member has default permission
-                    and_(ShareUserPermissions.c.user_id==user_id,ShareUserPermissions.c.default.in_(requiredPermissions),SurveyShare.permission.in_(requiredPermissions),or_(SurveyPermissionException.id==None,SurveyPermissionException.user_id!=user_id)),
+                    and_(ShareUserPermissions.c.user_id==user_id,ShareUserPermissions.c.default.in_(requiredPermissions),SurveyShare.permission.in_(requiredPermissions),SurveyPermissionException.id==None),
                     # There is an exception for the survey (organisation member or share organisation)
                     and_(SurveyPermissionException.user_id==user_id,SurveyPermissionException.permission.in_(requiredPermissions))
                 ))
