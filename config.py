@@ -39,3 +39,6 @@ class Config(object):
         'golden': 0.9,
         'user': 0
     }
+
+    # Detection statuses
+    DET_IGNORE_STATUSES = ['deleted','hidden','masked']

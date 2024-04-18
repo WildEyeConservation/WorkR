@@ -118,7 +118,7 @@ def calculate_activity_pattern(self,task_ids,trapgroups,groups,species,baseUnit,
                             .filter(Labelgroup.task_id.in_(task_ids))\
                             .filter(or_(and_(Detection.source==model,Detection.score>Config.DETECTOR_THRESHOLDS[model]) for model in Config.DETECTOR_THRESHOLDS))\
                             .filter(Detection.static==False)\
-                            .filter(~Detection.status.in_(['deleted','hidden']))\
+                            .filter(~Detection.status.in_(Config.DET_IGNORE_STATUSES))\
                             .filter(Trapgroup.survey_id.in_(survey_ids))
 
             elif baseUnit == '2': # Cluster
@@ -142,7 +142,7 @@ def calculate_activity_pattern(self,task_ids,trapgroups,groups,species,baseUnit,
                             .filter(Labelgroup.task_id.in_(task_ids))\
                             .filter(or_(and_(Detection.source==model,Detection.score>Config.DETECTOR_THRESHOLDS[model]) for model in Config.DETECTOR_THRESHOLDS))\
                             .filter(Detection.static==False)\
-                            .filter(~Detection.status.in_(['deleted','hidden']))\
+                            .filter(~Detection.status.in_(Config.DET_IGNORE_STATUSES))\
                             .filter(Trapgroup.survey_id.in_(survey_ids))
 
             elif baseUnit == '3':  # Detection
@@ -164,7 +164,7 @@ def calculate_activity_pattern(self,task_ids,trapgroups,groups,species,baseUnit,
                             .filter(Labelgroup.task_id.in_(task_ids))\
                             .filter(or_(and_(Detection.source==model,Detection.score>Config.DETECTOR_THRESHOLDS[model]) for model in Config.DETECTOR_THRESHOLDS))\
                             .filter(Detection.static==False)\
-                            .filter(~Detection.status.in_(['deleted','hidden']))\
+                            .filter(~Detection.status.in_(Config.DET_IGNORE_STATUSES))\
                             .filter(Trapgroup.survey_id.in_(survey_ids))
 
             if trapgroups != '0' and trapgroups != '-1' and groups != '0' and groups != '-1':
@@ -404,7 +404,7 @@ def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroup
                 .outerjoin(Sitegroup, Trapgroup.sitegroups)\
                 .filter(Trapgroup.survey_id.in_(survey_ids))\
                 .filter(Image.corrected_timestamp != None)\
-                .filter(~Detection.status.in_(['deleted','hidden']))\
+                .filter(~Detection.status.in_(Config.DET_IGNORE_STATUSES))\
                 .filter(or_(and_(Detection.source==model,Detection.score>Config.DETECTOR_THRESHOLDS[model]) for model in Config.DETECTOR_THRESHOLDS))\
                 .filter(Detection.static==False)\
                 .filter(Labelgroup.task_id.in_(task_ids))
@@ -427,7 +427,7 @@ def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroup
                 .outerjoin(Sitegroup, Trapgroup.sitegroups)\
                 .filter(Trapgroup.survey_id.in_(survey_ids))\
                 .filter(Image.corrected_timestamp != None)\
-                .filter(~Detection.status.in_(['deleted','hidden']))\
+                .filter(~Detection.status.in_(Config.DET_IGNORE_STATUSES))\
                 .filter(or_(and_(Detection.source==model,Detection.score>Config.DETECTOR_THRESHOLDS[model]) for model in Config.DETECTOR_THRESHOLDS))\
                 .filter(Detection.static==False)\
                 .filter(Labelgroup.task_id.in_(task_ids))\
@@ -450,7 +450,7 @@ def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroup
                 .outerjoin(Sitegroup, Trapgroup.sitegroups)\
                 .filter(Trapgroup.survey_id.in_(survey_ids))\
                 .filter(Image.corrected_timestamp != None)\
-                .filter(~Detection.status.in_(['deleted','hidden']))\
+                .filter(~Detection.status.in_(Config.DET_IGNORE_STATUSES))\
                 .filter(or_(and_(Detection.source==model,Detection.score>Config.DETECTOR_THRESHOLDS[model]) for model in Config.DETECTOR_THRESHOLDS))\
                 .filter(Detection.static==False)\
                 .filter(Labelgroup.task_id.in_(task_ids))
