@@ -747,7 +747,7 @@ def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroup
     return { 'status': status, 'error': error, 'occupancy_results': occupancy_results }
 
 @app.task(name='WorkR.calculate_spatial_capture_recapture',bind=True,soft_time_limit=82800)
-def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgroups, groups, startDate, endDate, window, tags, siteCovs, covOptions, bucket, folder, csv, shapefile, polygonGeoJSON, shxfile):
+def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgroups, groups, startDate, endDate, window, tags, siteCovs, covOptions, bucket, folder, csv, shapefile, polygonGeoJSON, shxfile, flank):
     ''' Calculates spatial capture recapture for a given species in R '''	
     try:
         pandas2ri.activate()
@@ -817,6 +817,25 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                 individuals = individuals.filter(Image.corrected_timestamp <= endDate)       
                 sites = sites.filter(Image.corrected_timestamp <= endDate)          
 
+            flank_used = None
+            if flank and flank != 'ignore':
+                if flank == 'auto':
+                    flank_counts = db.session.query(Detection.flank, func.count(distinct(Individual.id)))\
+                                        .join(Individual, Detection.individuals)\
+                                        .join(Task, Individual.tasks)\
+                                        .filter(Individual.species.in_(species))\
+                                        .filter(Task.id.in_(task_ids))\
+                                        .filter(Detection.flank != None)\
+                                        .filter(Detection.flank != 'A')\
+                                        .group_by(Detection.flank)\
+                                        .distinct().all()
+                    if flank_counts:
+                        max_flank = max(flank_counts, key=lambda x: x[1])[0]
+                        individuals = individuals.filter(Detection.flank == max_flank)
+                        flank_used = max_flank
+                else:
+                    individuals = individuals.filter(Detection.flank == flank)
+                    flank_used = flank
 
             individuals_df = pd.DataFrame(individuals.all(), columns=['individual_id', 'species', 'indiv_tags' ,'timestamp', 'tag', 'latitude', 'longitude'])   
             sites_df = pd.DataFrame(sites.group_by(Trapgroup.id).all(), columns=['id', 'tag', 'latitude', 'longitude', 'first_date', 'last_date'])
@@ -1176,7 +1195,8 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                     'message': message,
                     'individual_counts': individual_counts,
                     'raster': raster_df,
-                    'sites_density': sites_density
+                    'sites_density': sites_density,
+                    'flank': flank_used
                 }
 
                 status = 'SUCCESS'
