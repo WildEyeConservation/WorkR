@@ -783,7 +783,8 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                                                 Image.corrected_timestamp,
                                                 Trapgroup.tag,
                                                 Trapgroup.latitude,
-                                                Trapgroup.longitude)\
+                                                Trapgroup.longitude,
+                                                Detection.flank)\
                                         .join(Detection,Individual.detections)\
                                         .join(Image)\
                                         .join(Task,Individual.tasks)\
@@ -817,27 +818,8 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                 individuals = individuals.filter(Image.corrected_timestamp <= endDate)       
                 sites = sites.filter(Image.corrected_timestamp <= endDate)          
 
-            flank_used = None
-            if flank and flank != 'ignore':
-                if flank == 'auto':
-                    flank_counts = db.session.query(Detection.flank, func.count(distinct(Individual.id)))\
-                                        .join(Individual, Detection.individuals)\
-                                        .join(Task, Individual.tasks)\
-                                        .filter(Individual.species.in_(species))\
-                                        .filter(Task.id.in_(task_ids))\
-                                        .filter(Detection.flank != None)\
-                                        .filter(Detection.flank != 'A')\
-                                        .group_by(Detection.flank)\
-                                        .distinct().all()
-                    if flank_counts:
-                        max_flank = max(flank_counts, key=lambda x: x[1])[0]
-                        individuals = individuals.filter(Detection.flank == max_flank)
-                        flank_used = max_flank
-                else:
-                    individuals = individuals.filter(Detection.flank == flank)
-                    flank_used = flank
 
-            individuals_df = pd.DataFrame(individuals.all(), columns=['individual_id', 'species', 'indiv_tags' ,'timestamp', 'tag', 'latitude', 'longitude'])   
+            individuals_df = pd.DataFrame(individuals.all(), columns=['individual_id', 'species', 'indiv_tags' ,'timestamp', 'tag', 'latitude', 'longitude', 'flank'])   
             sites_df = pd.DataFrame(sites.group_by(Trapgroup.id).all(), columns=['id', 'tag', 'latitude', 'longitude', 'first_date', 'last_date'])
 
             if tags != '-1':
@@ -845,6 +827,23 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                 tags.append('NA') 
                 individuals_df = individuals_df[individuals_df['indiv_tags'].isin(tags)]
 
+            flank_used = None
+            if flank and flank != 'ignore':	
+                if flank == 'hybrid':
+                    # Hybrid approach - Find the flank that contains the most individuals and only keep individuals that contain detections in that flank 
+                    flank_counts = individuals_df.groupby(['flank']).agg({'individual_id': 'nunique'}).reset_index()
+                    max_flank = flank_counts['flank'][flank_counts['individual_id'].idxmax()]
+                    flank_used = max_flank
+                    individuals_flank = individuals_df.groupby(['individual_id']).agg({'flank': lambda x: ', '.join(x)}).reset_index()
+                    drop_individuals = individuals_flank[~individuals_flank['flank'].str.contains(max_flank)]['individual_id'].tolist()
+                    individuals_df = individuals_df[~individuals_df['individual_id'].isin(drop_individuals)]
+                else:
+                    individuals_df = individuals_df[individuals_df['flank'] == flank]
+                    flank_used = flank
+
+            # Drop flank column
+            individuals_df = individuals_df.drop(columns=['flank'])
+                
             # add column for session and set to 1
             individuals_df['session'] = 1
 
