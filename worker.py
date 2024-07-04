@@ -827,16 +827,19 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                 tags.append('NA') 
                 individuals_df = individuals_df[individuals_df['indiv_tags'].isin(tags)]
 
-            flank_used = None
+            flank_used = 'All'
             if flank and flank != 'ignore':	
                 if flank == 'hybrid':
                     # Hybrid approach - Find the flank that contains the most individuals and only keep individuals that contain detections in that flank 
                     flank_counts = individuals_df.groupby(['flank']).agg({'individual_id': 'nunique'}).reset_index()
                     max_flank = flank_counts['flank'][flank_counts['individual_id'].idxmax()]
-                    flank_used = max_flank
-                    individuals_flank = individuals_df.groupby(['individual_id']).agg({'flank': lambda x: ', '.join(x)}).reset_index()
-                    drop_individuals = individuals_flank[~individuals_flank['flank'].str.contains(max_flank)]['individual_id'].tolist()
-                    individuals_df = individuals_df[~individuals_df['individual_id'].isin(drop_individuals)]
+                    if max_flank == 'A':
+                        flank_used = 'All'
+                    else:
+                        flank_used = max_flank
+                        individuals_flank = individuals_df.groupby(['individual_id']).agg({'flank': lambda x: ', '.join(x)}).reset_index()
+                        drop_individuals = individuals_flank[~individuals_flank['flank'].str.contains(max_flank)]['individual_id'].tolist()
+                        individuals_df = individuals_df[~individuals_df['individual_id'].isin(drop_individuals)]
                 else:
                     individuals_df = individuals_df[individuals_df['flank'] == flank]
                     flank_used = flank
@@ -1141,6 +1144,7 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                 summary.rename(columns={'best_model': 'Best Model', 'best_model_formula': 'Best Model Formula'}, inplace=True)
                 summary = summary.replace([np.inf, -np.inf], 'Inf')
                 summary = summary.replace([np.nan], 'NA')
+                summary['Flank'] = flank_used
                 summary = summary.to_dict(orient='records')
 
                 aic = pd.DataFrame(scr_results.rx2('aic'))
@@ -1194,8 +1198,7 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                     'message': message,
                     'individual_counts': individual_counts,
                     'raster': raster_df,
-                    'sites_density': sites_density,
-                    'flank': flank_used
+                    'sites_density': sites_density
                 }
 
                 status = 'SUCCESS'
