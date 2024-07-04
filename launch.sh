@@ -82,7 +82,7 @@ printf \
 'AWS_S3_DOWNLOAD_ACCESS_KEY_ID='$AWS_S3_DOWNLOAD_ACCESS_KEY_ID'\n'\
 'AWS_S3_DOWNLOAD_SECRET_ACCESS_KEY='$AWS_S3_DOWNLOAD_SECRET_ACCESS_KEY'\n'
 
-docker-compose -f /home/ubuntu/TrapTagger/WorkR/docker-compose.yml up > worker.log 2>&1 &
+docker compose -f /home/ubuntu/TrapTagger/WorkR/docker-compose.yml up > worker.log 2>&1 &
 LAUNCH_TIME="$(date -u +%s)"
 echo "Container launched"
 
@@ -137,6 +137,6 @@ while $flag; do
 
 done
 
-docker-compose -f /home/ubuntu/TrapTagger/WorkR/docker-compose.yml down
+docker compose -f /home/ubuntu/TrapTagger/WorkR/docker-compose.yml down
 echo "Container shut down. Goodbye."
 poweroff
