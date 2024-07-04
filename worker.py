@@ -832,15 +832,15 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                 if flank == 'hybrid':
                     # Hybrid approach - Find the flank that contains the most individuals and only keep individuals that contain detections in that flank 
                     flank_counts = individuals_df.groupby(['flank']).agg({'individual_id': 'nunique'}).reset_index()
-                    max_flank = flank_counts['flank'][flank_counts['individual_id'].idxmax()]
-                    if max_flank == 'A':
-                        flank_used = 'All'
-                    else:
-                        flank_used = max_flank
-                        individuals_flank = individuals_df.groupby(['individual_id']).agg({'flank': lambda x: ', '.join(x)}).reset_index()
-                        drop_individuals = individuals_flank[~individuals_flank['flank'].str.contains(max_flank)]['individual_id'].tolist()
-                        individuals_df = individuals_df[~individuals_df['individual_id'].isin(drop_individuals)]
+                    if not flank_counts.empty:
+                        max_flank = flank_counts['flank'][flank_counts['individual_id'].idxmax()]
+                        if max_flank != 'A' and max_flank != None and max_flank != 'None':
+                            flank_used = max_flank
+                            individuals_flank = individuals_df.groupby(['individual_id']).agg({'flank': lambda x: ', '.join(x)}).reset_index()
+                            drop_individuals = individuals_flank[~individuals_flank['flank'].str.contains(max_flank)]['individual_id'].tolist()
+                            individuals_df = individuals_df[~individuals_df['individual_id'].isin(drop_individuals)]
                 else:
+                    # Filter individuals by flank
                     individuals_df = individuals_df[individuals_df['flank'] == flank]
                     flank_used = flank
 
