@@ -774,7 +774,8 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
                             .join(Camera, Camera.trapgroup_id==Trapgroup.id)\
                             .join(Image)\
                             .outerjoin(Sitegroup, Trapgroup.sitegroups)\
-                            .filter(Trapgroup.survey_id.in_(survey_ids))
+                            .filter(Trapgroup.survey_id.in_(survey_ids))\
+                            .filter(Image.corrected_timestamp != None)
 
     
             individuals = db.session.query(Individual.id,
