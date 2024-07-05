@@ -846,6 +846,11 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
 
             # Drop flank column
             individuals_df = individuals_df.drop(columns=['flank'])
+            
+            if individuals_df.empty:
+                status = 'SUCCESS'
+                error = 'No individuals found'
+                return { 'status': status, 'error': error, 'scr_results': results }
                 
             # add column for session and set to 1
             individuals_df['session'] = 1
