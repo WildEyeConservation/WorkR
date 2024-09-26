@@ -37,7 +37,7 @@ import boto3
 import json
 
 REDIS_IP = os.environ.get('REDIS_IP') or '127.0.0.1'
-app = Celery('WorkR', broker='redis://'+REDIS_IP,backend='redis://'+REDIS_IP,broker_transport_options={'visibility_timeout': 604800},result_expires=604800,task_acks_late=True)
+app = Celery('WorkR', broker='redis://'+REDIS_IP,backend='redis://'+REDIS_IP,broker_transport_options={'visibility_timeout': 1209600},result_expires=1209600,task_acks_late=True,worker_prefetch_multiplier=1)
 workername="default"
 
 s3client = boto3.client('s3')
