@@ -21,7 +21,7 @@ from celery import Celery
 from celery.signals import celeryd_after_setup
 
 REDIS_IP = os.environ.get('REDIS_IP') or '127.0.0.1'
-app = Celery('WorkR', broker='redis://'+REDIS_IP,backend='redis://'+REDIS_IP,broker_transport_options={'visibility_timeout': 259200},result_expires=259200,task_acks_late=False,worker_prefetch_multiplier=1)
+app = Celery('WorkR', broker='redis://'+REDIS_IP,backend='redis://'+REDIS_IP,broker_transport_options={'visibility_timeout': 1209600},result_expires=1209600,task_acks_late=True,worker_prefetch_multiplier=1)
 workername="default"
 
 @app.task(name='WorkR.calculate_activity_pattern',bind=True,soft_time_limit=82800)
