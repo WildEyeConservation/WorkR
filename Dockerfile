@@ -55,12 +55,24 @@ RUN pip install -r requirements.txt
 # Install specific versions of PyTorch
 # RUN pip install torch==1.7.1+cu101 torchvision==0.8.2+cu101 torchaudio==0.7.2 -f https://download.pytorch.org/whl/torch_stable.html
 
+# Install R packages
+RUN Rscript -e "install.packages('remotes', repos='http://cran.rstudio.com/')"
 # Install R packages from r-packages.txt
-RUN Rscript -e "install.packages(readLines('r-packages.txt'))"
+# RUN Rscript -e "install.packages(readLines('r-packages.txt'))"
+RUN Rscript -e "\
+pkgs <- readLines('r-packages.txt'); \
+for (p in pkgs) { \
+  if (grepl('@', p)) { \
+    x <- strsplit(p, '@', fixed = TRUE)[[1]]; \
+    remotes::install_version(x[1], version = x[2], repos='https://cloud.r-project.org'); \
+  } else { \
+    install.packages(p, repos='https://cloud.r-project.org'); \
+  } \
+}"
+
 # Try this because vegan does not want to install in the above line
 # RUN Rscript -e "install.packages('vegan', dependencies=TRUE, repos='http://cran.rstudio.com/')"
 # Install oSCR from GitHub
-RUN Rscript -e "install.packages('remotes', dependencies=TRUE, repos='http://cran.rstudio.com/')"
 RUN Rscript -e "remotes::install_github('jaroyle/oSCR')"
 
 # Clean up
