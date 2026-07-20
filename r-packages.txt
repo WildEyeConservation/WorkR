@@ -14,3 +14,8 @@ unmarked@1.4.1
 AICcmodavg@2.3-3
 Rcapture@1.4-4
 solartime@0.0.2
+mrds@3.0.1
+Distance@2.0.1
+knitr@1.51
+kableExtra@1.4.1
+tidyverse@2.0.0

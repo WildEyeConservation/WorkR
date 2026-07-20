@@ -75,5 +75,8 @@ for (p in pkgs) { \
 # Install oSCR from GitHub
 RUN Rscript -e "remotes::install_github('jaroyle/oSCR')"
 
+# Install spaceNtime from GitHub (not on CRAN)
+RUN Rscript -e "remotes::install_github('annam21/spaceNtime', ref='1.3.0')"
+
 # Clean up
 RUN apt-get clean && rm -rf /var/lib/apt/lists/*
