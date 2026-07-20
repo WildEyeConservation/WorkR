@@ -17,5 +17,8 @@ solartime@0.0.2
 mrds@3.0.1
 Distance@2.0.1
 knitr@1.51
-kableExtra@1.4.1
-tidyverse@2.0.0
+magrittr@2.0.5
+purrr@1.2.2
+msm@1.8.2
+assertr@3.0.1
+tictoc@1.2.1

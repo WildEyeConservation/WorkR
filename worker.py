@@ -84,6 +84,234 @@ def surveyPermissionsSQ(sq,user_id,requiredPermission,aliasPermission=None):
                     and_(SurveyPermissionException.user_id==user_id,SurveyPermissionException.permission.in_(requiredPermissions))
                 ))
 
+def _site_sample_label(site_tag, latitude, longitude):
+    '''Builds a stable Sample.Label from site tag and coordinates.'''
+    return '{}_{:.4f}_{:.4f}'.format(site_tag, float(latitude), float(longitude))
+
+def build_distance_flatfile(task_ids, species, trapgroups, groups, startDate, endDate, area_km2, user_id, region_label=None):
+    '''
+    Builds a Distance-package flatfile DataFrame for camera-trap distance sampling.
+
+    Columns:
+        Region.Label  - survey/stratum name
+        Area          - study area in km^2 (user-supplied)
+        Sample.Label  - camera/site identifier
+        Effort        - active camera-days per site in the date range
+        distance      - detection distance in metres (NA for zero-detection sites)
+        object        - unique detection ID (NA for zero-detection sites)
+
+    Species is applied as a filter only; it is not a flatfile column.
+    '''
+    if task_ids[0] == '0':
+        tasks = surveyPermissionsSQ(
+            db.session.query(Task.id, Task.survey_id, Survey.name)
+                .join(Survey)
+                .filter(Task.name != 'default')
+                .filter(~Task.name.contains('_o_l_d_'))
+                .filter(~Task.name.contains('_copying'))
+                .group_by(Task.survey_id)
+                .order_by(Task.id),
+            user_id,
+            'read'
+        ).distinct().all()
+    else:
+        tasks = surveyPermissionsSQ(
+            db.session.query(Task.id, Task.survey_id, Survey.name)
+                .join(Survey)
+                .filter(Task.id.in_(task_ids)),
+            user_id,
+            'read'
+        ).distinct().all()
+
+    if not tasks:
+        return pd.DataFrame(columns=['Region.Label', 'Area', 'Sample.Label', 'Effort', 'distance', 'object'])
+
+    task_ids = [r[0] for r in tasks]
+    survey_ids = list(set([r[1] for r in tasks]))
+    if region_label is None:
+        survey_names = sorted(set([r[2] for r in tasks if r[2]]))
+        region_label = survey_names[0] if len(survey_names) == 1 else 'Combined'
+
+    # Site operation window + Sample.Label identity
+    siteQuery = db.session.query(
+        Trapgroup.id,
+        Trapgroup.tag,
+        Trapgroup.latitude,
+        Trapgroup.longitude,
+        func.min(Image.corrected_timestamp),
+        func.max(Image.corrected_timestamp),
+    )\
+    .join(Camera, Trapgroup.id == Camera.trapgroup_id)\
+    .join(Image)\
+    .outerjoin(Sitegroup, Trapgroup.sitegroups)\
+    .filter(Trapgroup.survey_id.in_(survey_ids))\
+    .filter(Image.corrected_timestamp != None)\
+    .group_by(Trapgroup.id)
+
+    if startDate:
+        siteQuery = siteQuery.filter(Image.corrected_timestamp >= startDate)
+    if endDate:
+        siteQuery = siteQuery.filter(Image.corrected_timestamp <= endDate)
+
+    if trapgroups != '0' and trapgroups != '-1' and groups != '0' and groups != '-1':
+        siteQuery = siteQuery.filter(or_(Trapgroup.id.in_(trapgroups), Sitegroup.id.in_(groups)))
+    elif trapgroups != '0' and trapgroups != '-1':
+        siteQuery = siteQuery.filter(Trapgroup.id.in_(trapgroups))
+    elif groups != '0' and groups != '-1':
+        siteQuery = siteQuery.filter(Sitegroup.id.in_(groups))
+
+    site_df = pd.DataFrame(
+        siteQuery.all(),
+        columns=['id', 'site_tag', 'latitude', 'longitude', 'first_date', 'last_date']
+    )
+    if site_df.empty:
+        return pd.DataFrame(columns=['Region.Label', 'Area', 'Sample.Label', 'Effort', 'distance', 'object'])
+
+    site_df = site_df.groupby(['site_tag', 'latitude', 'longitude']).agg({
+        'first_date': 'min',
+        'last_date': 'max',
+    }).reset_index()
+    site_df['Sample.Label'] = site_df.apply(
+        lambda r: _site_sample_label(r['site_tag'], r['latitude'], r['longitude']),
+        axis=1
+    )
+
+    # Effort = unique active camera-days per site (Summary-style effort days)
+    effortQuery = db.session.query(
+        Trapgroup.tag,
+        Trapgroup.latitude,
+        Trapgroup.longitude,
+        Image.corrected_timestamp,
+    )\
+    .join(Camera, Trapgroup.id == Camera.trapgroup_id)\
+    .join(Image)\
+    .outerjoin(Sitegroup, Trapgroup.sitegroups)\
+    .filter(Trapgroup.survey_id.in_(survey_ids))\
+    .filter(Image.corrected_timestamp != None)
+
+    if startDate:
+        effortQuery = effortQuery.filter(Image.corrected_timestamp >= startDate)
+    if endDate:
+        effortQuery = effortQuery.filter(Image.corrected_timestamp <= endDate)
+
+    if trapgroups != '0' and trapgroups != '-1' and groups != '0' and groups != '-1':
+        effortQuery = effortQuery.filter(or_(Trapgroup.id.in_(trapgroups), Sitegroup.id.in_(groups)))
+    elif trapgroups != '0' and trapgroups != '-1':
+        effortQuery = effortQuery.filter(Trapgroup.id.in_(trapgroups))
+    elif groups != '0' and groups != '-1':
+        effortQuery = effortQuery.filter(Sitegroup.id.in_(groups))
+
+    effort_df = pd.DataFrame(
+        effortQuery.all(),
+        columns=['site_tag', 'latitude', 'longitude', 'timestamp']
+    )
+    if effort_df.empty:
+        return pd.DataFrame(columns=['Region.Label', 'Area', 'Sample.Label', 'Effort', 'distance', 'object'])
+
+    effort_df['timestamp'] = pd.to_datetime(effort_df['timestamp'])
+    effort_df['date'] = effort_df['timestamp'].dt.date
+    effort_df['Sample.Label'] = effort_df.apply(
+        lambda r: _site_sample_label(r['site_tag'], r['latitude'], r['longitude']),
+        axis=1
+    )
+    effort_days = (
+        effort_df.groupby('Sample.Label')['date']
+        .nunique()
+        .reset_index()
+        .rename(columns={'date': 'Effort'})
+    )
+
+    site_effort = site_df[['Sample.Label']].drop_duplicates().merge(effort_days, on='Sample.Label', how='left')
+    site_effort['Effort'] = site_effort['Effort'].fillna(0).astype(float)
+
+    # Detection rows: one per detection with a measured distance for the selected species
+    detectionQuery = db.session.query(
+        Detection.id,
+        Detection.distance,
+        Image.corrected_timestamp,
+        Trapgroup.tag,
+        Trapgroup.latitude,
+        Trapgroup.longitude,
+        Label.description,
+    )\
+    .join(Image)\
+    .join(Camera)\
+    .join(Trapgroup)\
+    .join(Labelgroup)\
+    .join(Label, Labelgroup.labels)\
+    .outerjoin(Sitegroup, Trapgroup.sitegroups)\
+    .filter(Trapgroup.survey_id.in_(survey_ids))\
+    .filter(Image.corrected_timestamp != None)\
+    .filter(Detection.distance != None)\
+    .filter(~Detection.status.in_(Config.DET_IGNORE_STATUSES))\
+    .filter(or_(and_(Detection.source == model, Detection.score > Config.DETECTOR_THRESHOLDS[model]) for model in Config.DETECTOR_THRESHOLDS))\
+    .filter(Detection.static == False)\
+    .filter(Labelgroup.task_id.in_(task_ids))
+
+    if startDate:
+        detectionQuery = detectionQuery.filter(Image.corrected_timestamp >= startDate)
+    if endDate:
+        detectionQuery = detectionQuery.filter(Image.corrected_timestamp <= endDate)
+
+    if species and species != '0':
+        if isinstance(species, str):
+            species = [species]
+        labels = db.session.query(Label).filter(Label.description.in_(species)).filter(Label.task_id.in_(task_ids)).all()
+        label_list = []
+        for label in labels:
+            label_list.append(label.id)
+            label_list.extend(getChildList(label, int(label.task_id)))
+        detectionQuery = detectionQuery.filter(Labelgroup.labels.any(Label.id.in_(label_list)))
+    else:
+        vhl = db.session.query(Label).get(vhl_id)
+        label_list = [vhl_id, nothing_id, knocked_id]
+        for task_id in task_ids:
+            label_list.extend(getChildList(vhl, int(task_id)))
+        detectionQuery = detectionQuery.filter(~Labelgroup.labels.any(Label.id.in_(label_list)))
+
+    if trapgroups != '0' and trapgroups != '-1' and groups != '0' and groups != '-1':
+        detectionQuery = detectionQuery.filter(or_(Trapgroup.id.in_(trapgroups), Sitegroup.id.in_(groups)))
+    elif trapgroups != '0' and trapgroups != '-1':
+        detectionQuery = detectionQuery.filter(Trapgroup.id.in_(trapgroups))
+    elif groups != '0' and groups != '-1':
+        detectionQuery = detectionQuery.filter(Sitegroup.id.in_(groups))
+
+    detection_df = pd.DataFrame(
+        detectionQuery.all(),
+        columns=['detection_id', 'distance', 'timestamp', 'site_tag', 'latitude', 'longitude', 'species']
+    )
+
+    if not detection_df.empty:
+        detection_df['Sample.Label'] = detection_df.apply(
+            lambda r: _site_sample_label(r['site_tag'], r['latitude'], r['longitude']),
+            axis=1
+        )
+        detection_df = detection_df.merge(site_effort, on='Sample.Label', how='inner')
+        detection_df['Region.Label'] = region_label
+        detection_df['Area'] = float(area_km2)
+        detection_df['object'] = np.arange(1, len(detection_df) + 1)
+        detection_rows = detection_df[['Region.Label', 'Area', 'Sample.Label', 'Effort', 'distance', 'object']].copy()
+    else:
+        detection_rows = pd.DataFrame(columns=['Region.Label', 'Area', 'Sample.Label', 'Effort', 'distance', 'object'])
+
+    # Zero-detection sites still need a row so their Effort is retained
+    sites_with_detections = set(detection_rows['Sample.Label'].unique()) if not detection_rows.empty else set()
+    zero_sites = site_effort[~site_effort['Sample.Label'].isin(sites_with_detections)].copy()
+    if not zero_sites.empty:
+        zero_sites['Region.Label'] = region_label
+        zero_sites['Area'] = float(area_km2)
+        zero_sites['distance'] = np.nan
+        zero_sites['object'] = np.nan
+        zero_rows = zero_sites[['Region.Label', 'Area', 'Sample.Label', 'Effort', 'distance', 'object']]
+    else:
+        zero_rows = pd.DataFrame(columns=['Region.Label', 'Area', 'Sample.Label', 'Effort', 'distance', 'object'])
+
+    flatfile = pd.concat([detection_rows, zero_rows], ignore_index=True)
+    flatfile['Effort'] = flatfile['Effort'].astype(float)
+    flatfile['Area'] = flatfile['Area'].astype(float)
+    flatfile['distance'] = pd.to_numeric(flatfile['distance'], errors='coerce')
+    return flatfile
+
 @app.task(name='WorkR.calculate_activity_pattern',bind=True,soft_time_limit=82800)
 def calculate_activity_pattern(self,task_ids,trapgroups,groups,species,baseUnit,user_id,startDate,endDate,unit,centre,time,overlap, bucket, folder, csv, timeToIndependence, timeToIndependenceUnit):
     ''' Calculates the activity patterns for a set of species with R'''
