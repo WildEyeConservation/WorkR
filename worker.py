@@ -38,3 +38,8 @@ def calculate_occupancy_analysis(self, task_ids,  species,  baseUnit,  trapgroup
 def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgroups, groups, startDate, endDate, window, tags, siteCovs, covOptions, bucket, folder, csv, shapefile, polygonGeoJSON, shxfile, flank):
     ''' Calculates spatial capture recapture for a given species in R '''	
     return { 'status': None, 'error': None, 'scr_results': None }
+
+@app.task(name='WorkR.calculate_distance_sampling', bind=True, soft_time_limit=82800)
+def calculate_distance_sampling(self, task_ids, species, trapgroups, groups, startDate, endDate, area_km2, fov_degrees, user_id, folder, bucket, csv, left_trunc=None, right_trunc=None):
+    '''Stub: distance sampling runs on statistics-queue workers (dev-morpho-master).'''
+    return {'status': None, 'error': None, 'distance_results': None}
