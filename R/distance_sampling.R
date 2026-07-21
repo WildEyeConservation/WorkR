@@ -98,21 +98,31 @@ calculate_distance_sampling <- function(flatfile, fov_degrees, left_trunc = NA, 
       model,
       flatfile = data,
       strat_formula = ~1,
+      stratification = "geographical",
       sample_fraction = sample_fraction,
       er_est = "P2",
       convert_units = conversion
     )
 
-    drow <- dens$individuals$D
+    # Distance 2.x: dht2 returns dht_result; density table is in attr(dens, "density")
+    drow <- attr(dens, "density")
     if (is.null(drow) || nrow(drow) < 1) {
       stop("Density estimation returned no results.")
     }
 
-    result$density <- as.numeric(drow$Estimate[1])
-    result$density_se <- as.numeric(drow$se[1])
-    result$density_lci <- as.numeric(drow$LCI[1])
-    result$density_uci <- as.numeric(drow$UCI[1])
-    result$density_cv <- as.numeric(drow$cv[1])
+    pick_col <- function(candidates) {
+      hit <- candidates[candidates %in% names(drow)]
+      if (length(hit) == 0) {
+        return(NA_real_)
+      }
+      as.numeric(drow[[hit[1]]][1])
+    }
+
+    result$density <- pick_col(c("Density", "Estimate"))
+    result$density_se <- pick_col(c("Density_se", "se"))
+    result$density_lci <- pick_col(c("LCI"))
+    result$density_uci <- pick_col(c("UCI"))
+    result$density_cv <- pick_col(c("Density_CV", "cv"))
     if ("df" %in% names(drow)) {
       result$density_df <- as.numeric(drow$df[1])
     }
