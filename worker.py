@@ -88,7 +88,7 @@ def _site_sample_label(site_tag, latitude, longitude):
     '''Builds a stable Sample.Label from site tag and coordinates.'''
     return '{}_{:.4f}_{:.4f}'.format(site_tag, float(latitude), float(longitude))
 
-def build_distance_flatfile(task_ids, species, trapgroups, groups, startDate, endDate, area_km2, user_id, region_label=None):
+def build_distance_flatfile(task_ids, survey_ids, region_label, species, trapgroups, groups, startDate, endDate, area_km2):
     '''
     Builds a Distance-package flatfile DataFrame for camera-trap distance sampling.
 
@@ -101,36 +101,11 @@ def build_distance_flatfile(task_ids, species, trapgroups, groups, startDate, en
         object        - unique detection ID (NA for zero-detection sites)
 
     Species is applied as a filter only; it is not a flatfile column.
+    Caller must resolve task_ids, survey_ids, and region_label (with permissions) first.
     '''
-    if task_ids[0] == '0':
-        tasks = surveyPermissionsSQ(
-            db.session.query(Task.id, Task.survey_id, Survey.name)
-                .join(Survey)
-                .filter(Task.name != 'default')
-                .filter(~Task.name.contains('_o_l_d_'))
-                .filter(~Task.name.contains('_copying'))
-                .group_by(Task.survey_id)
-                .order_by(Task.id),
-            user_id,
-            'read'
-        ).distinct().all()
-    else:
-        tasks = surveyPermissionsSQ(
-            db.session.query(Task.id, Task.survey_id, Survey.name)
-                .join(Survey)
-                .filter(Task.id.in_(task_ids)),
-            user_id,
-            'read'
-        ).distinct().all()
-
-    if not tasks:
-        return pd.DataFrame(columns=['Region.Label', 'Area', 'Sample.Label', 'Effort', 'distance', 'object'])
-
-    task_ids = [r[0] for r in tasks]
-    survey_ids = list(set([r[1] for r in tasks]))
-    if region_label is None:
-        survey_names = sorted(set([r[2] for r in tasks if r[2]]))
-        region_label = survey_names[0] if len(survey_names) == 1 else 'Combined'
+    empty = pd.DataFrame(columns=['Region.Label', 'Area', 'Sample.Label', 'Effort', 'distance', 'object'])
+    if not task_ids or not survey_ids:
+        return empty
 
     # Site operation window + Sample.Label identity
     siteQuery = db.session.query(
@@ -176,7 +151,7 @@ def build_distance_flatfile(task_ids, species, trapgroups, groups, startDate, en
         axis=1
     )
 
-    # Effort = unique active camera-days per site (Summary-style effort days)
+    # Effort = unique active camera-days per site
     effortQuery = db.session.query(
         Trapgroup.tag,
         Trapgroup.latitude,
@@ -311,6 +286,186 @@ def build_distance_flatfile(task_ids, species, trapgroups, groups, startDate, en
     flatfile['Area'] = flatfile['Area'].astype(float)
     flatfile['distance'] = pd.to_numeric(flatfile['distance'], errors='coerce')
     return flatfile
+
+def _distance_sampling_filename_prefix(user_name, species):
+    '''Builds a shared S3 filename prefix for distance-sampling exports.'''
+    fileName = user_name + '_Distance_Sampling'
+    if species and species != '0':
+        if isinstance(species, str):
+            species = [species]
+        for specie in species:
+            fileName += '_' + specie
+    return fileName
+
+def _distance_results_from_r(r_results):
+    '''Converts the R distance-sampling result list into a JSON-serialisable dict.'''
+    status = str(r_results.rx2('status')[0])
+    try:
+        error_val = r_results.rx2('error')[0]
+        error = None if str(error_val) in ('NULL', 'NA') else str(error_val)
+    except Exception:
+        error = None
+
+    def _safe_float(name):
+        try:
+            value = float(r_results.rx2(name)[0])
+            if np.isnan(value):
+                return None
+            return value
+        except Exception:
+            return None
+
+    def _safe_int(name):
+        try:
+            return int(r_results.rx2(name)[0])
+        except Exception:
+            return None
+
+    distance_results = {
+        'status': status,
+        'error': error,
+        'density': _safe_float('density'),
+        'density_se': _safe_float('density_se'),
+        'density_lci': _safe_float('density_lci'),
+        'density_uci': _safe_float('density_uci'),
+        'density_cv': _safe_float('density_cv'),
+        'density_df': _safe_float('density_df'),
+        'n_detections': _safe_int('n_detections'),
+        'n_sites': _safe_int('n_sites'),
+        'sample_fraction': _safe_float('sample_fraction'),
+        'model_key': str(r_results.rx2('model_key')[0]),
+        'effective_detection_radius': _safe_float('effective_detection_radius'),
+        'plot_url': None,
+    }
+    return status, error, distance_results
+
+@app.task(name='WorkR.calculate_distance_sampling', bind=True, soft_time_limit=82800)
+def calculate_distance_sampling(self, task_ids, species, trapgroups, groups, startDate, endDate, area_km2, fov_degrees, user_id, folder, bucket, csv, left_trunc=None, right_trunc=None):
+    '''Calculates camera-trap distance sampling density with R.'''
+    try:
+        pandas2ri.activate()
+        distance_results = {}
+        status = 'SUCCESS'
+        error = None
+        user_name = db.session.query(User.username).filter(User.id == user_id).first()[0]
+
+        if task_ids:
+            if task_ids[0] == '0':
+                tasks = surveyPermissionsSQ(
+                    db.session.query(Task.id, Task.survey_id, Survey.name)
+                        .join(Survey)
+                        .filter(Task.name != 'default')
+                        .filter(~Task.name.contains('_o_l_d_'))
+                        .filter(~Task.name.contains('_copying'))
+                        .group_by(Task.survey_id)
+                        .order_by(Task.id),
+                    user_id,
+                    'read'
+                ).distinct().all()
+            else:
+                tasks = surveyPermissionsSQ(
+                    db.session.query(Task.id, Task.survey_id, Survey.name)
+                        .join(Survey)
+                        .filter(Task.id.in_(task_ids)),
+                    user_id,
+                    'read'
+                ).distinct().all()
+
+            task_ids = [r[0] for r in tasks]
+            survey_ids = list(set([r[1] for r in tasks]))
+            survey_names = sorted(set([r[2] for r in tasks if r[2]]))
+            region_label = survey_names[0] if len(survey_names) == 1 else 'Combined'
+
+            if not task_ids:
+                status = 'FAILURE'
+                error = 'No accessible tasks found for the selected surveys.'
+            else:
+                flatfile = build_distance_flatfile(
+                    task_ids,
+                    survey_ids,
+                    region_label,
+                    species,
+                    trapgroups,
+                    groups,
+                    startDate,
+                    endDate,
+                    area_km2,
+                )
+
+                file_prefix = _distance_sampling_filename_prefix(user_name, species)
+
+                if csv:
+                    with tempfile.NamedTemporaryFile(delete=True, suffix='.csv') as temp_file:
+                        flatfile.to_csv(temp_file.name, index=False)
+                        fileName = folder + '/docs/' + file_prefix + '_Flatfile.csv'
+                        temp_file = open(temp_file.name, 'rb')
+                        s3client.put_object(Bucket=bucket, Key=fileName, Body=temp_file)
+                        flatfile_url = 'https://' + bucket + '.s3.amazonaws.com/' + fileName
+                        distance_results = {
+                            'flatfile_url': flatfile_url
+                        }
+                elif flatfile.empty:
+                    distance_results = {
+                        'status': 'FAILURE',
+                        'error': 'No sites with effort found for the selected filters.',
+                        'density': None,
+                        'density_se': None,
+                        'density_lci': None,
+                        'density_uci': None,
+                        'density_cv': None,
+                        'density_df': None,
+                        'n_detections': 0,
+                        'n_sites': 0,
+                        'sample_fraction': None,
+                        'model_key': 'half-normal',
+                        'effective_detection_radius': None,
+                        'plot_url': None,
+                    }
+                    status = 'FAILURE'
+                    error = distance_results['error']
+                else:
+                    flatfile_r = robjects.conversion.py2rpy(flatfile)
+                    left_trunc_r = robjects.r('NA_real_') if left_trunc is None else float(left_trunc)
+                    right_trunc_r = robjects.r('NA_real_') if right_trunc is None else float(right_trunc)
+
+                    r = robjects.r
+                    r.source('R/distance_sampling.R')
+
+                    with tempfile.NamedTemporaryFile(delete=True, suffix='.JPG') as temp_file:
+                        plot_file = temp_file.name.split('.JPG')[0]
+                        r_results = r.calculate_distance_sampling(
+                            flatfile_r,
+                            float(fov_degrees),
+                            left_trunc_r,
+                            right_trunc_r,
+                            plot_file
+                        )
+                        r_status, r_error, distance_results = _distance_results_from_r(r_results)
+
+                        if r_status == 'SUCCESS' and os.path.exists(plot_file + '.JPG'):
+                            fileName = folder + '/docs/' + file_prefix + '_' + datetime.now().strftime('%Y-%m-%d_%H:%M:%S') + '.JPG'
+                            with open(plot_file + '.JPG', 'rb') as plot_handle:
+                                s3client.put_object(Bucket=bucket, Key=fileName, Body=plot_handle)
+                            distance_results['plot_url'] = 'https://' + bucket + '.s3.amazonaws.com/' + fileName
+
+                        if distance_results.get('status') == 'FAILURE':
+                            status = 'FAILURE'
+                            error = distance_results.get('error') or 'Distance sampling analysis failed.'
+
+    except Exception as exc:
+        print(' ')
+        print('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+        print(traceback.format_exc())
+        print('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+        print(' ')
+        status = 'FAILURE'
+        error = str(exc)
+        distance_results = {}
+
+    finally:
+        db.session.remove()
+
+    return {'status': status, 'error': error, 'distance_results': distance_results}
 
 @app.task(name='WorkR.calculate_activity_pattern',bind=True,soft_time_limit=82800)
 def calculate_activity_pattern(self,task_ids,trapgroups,groups,species,baseUnit,user_id,startDate,endDate,unit,centre,time,overlap, bucket, folder, csv, timeToIndependence, timeToIndependenceUnit):
