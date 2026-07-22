@@ -184,7 +184,7 @@ MIN_PER_BIN <- 3L
     return(data.frame())
   }
   models <- lapply(ok, function(x) x$model)
-  qaic <- do.call(QAIC, models)
+  qaic <- do.call(QAIC, unname(models))
   qaic <- as.data.frame(qaic)
   qaic$Model <- vapply(ok, function(x) x$label, character(1))
   if ("chat" %in% names(qaic)) {
@@ -251,7 +251,7 @@ MIN_PER_BIN <- 3L
 
   if (length(family_winners) >= 2L) {
     winner_models <- lapply(family_winners, function(x) x$model)
-    chi2_result <- do.call(chi2_select, winner_models)
+    chi2_result <- do.call(chi2_select, unname(winner_models))
     criteria <- as.numeric(chi2_result$criteria)
     modnames <- vapply(family_winners, function(x) {
       if (!is.null(x$model$ddf$name.message)) {
