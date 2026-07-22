@@ -88,7 +88,54 @@ def _site_sample_label(site_tag, latitude, longitude):
     '''Builds a stable Sample.Label from site tag and coordinates.'''
     return '{}_{:.4f}_{:.4f}'.format(site_tag, float(latitude), float(longitude))
 
-def build_distance_flatfile(task_ids, survey_ids, region_label, species, trapgroups, groups, startDate, endDate, area_km2):
+def _apply_distance_site_filters(query, trapgroups, groups):
+    '''Applies trapgroup / sitegroup filters used by distance-sampling queries.'''
+    if trapgroups != '0' and trapgroups != '-1' and groups != '0' and groups != '-1':
+        return query.filter(or_(Trapgroup.id.in_(trapgroups), Sitegroup.id.in_(groups)))
+    if trapgroups != '0' and trapgroups != '-1':
+        return query.filter(Trapgroup.id.in_(trapgroups))
+    if groups != '0' and groups != '-1':
+        return query.filter(Sitegroup.id.in_(groups))
+    return query
+
+def _operating_seconds_for_site(user_start, user_end, first_image, last_image):
+    '''
+    Inclusive operating seconds for a camera site.
+    Uses user analysis dates when supplied, otherwise first/last image timestamps.
+    Assumes 24 h camera operation per day.
+    '''
+    if user_start is not None:
+        op_start = pd.to_datetime(user_start).normalize()
+    elif first_image is not None and not pd.isna(first_image):
+        op_start = pd.to_datetime(first_image).normalize()
+    else:
+        return None
+
+    if user_end is not None:
+        op_end = pd.to_datetime(user_end)
+    elif last_image is not None and not pd.isna(last_image):
+        op_end = pd.to_datetime(last_image)
+    else:
+        return None
+
+    if op_end < op_start:
+        return None
+
+    operating_days = (op_end.normalize().date() - op_start.date()).days + 1
+    if operating_days <= 0:
+        return None
+    return operating_days * 86400
+
+def _snapshot_effort(operating_seconds, snapshot_interval_seconds):
+    '''Temporal effort for dht2: operating seconds / snapshot interval (Howe T_k / t).'''
+    if operating_seconds is None or operating_seconds <= 0:
+        return 0.0
+    interval = float(snapshot_interval_seconds)
+    if interval <= 0:
+        raise ValueError('snapshot_interval_seconds must be greater than 0.')
+    return operating_seconds / interval
+
+def build_distance_flatfile(task_ids, survey_ids, region_label, species, trapgroups, groups, startDate, endDate, area_km2, snapshot_interval_seconds=2.0):
     '''
     Builds a Distance-package flatfile DataFrame for camera-trap distance sampling.
 
@@ -96,7 +143,7 @@ def build_distance_flatfile(task_ids, survey_ids, region_label, species, trapgro
         Region.Label  - survey/stratum name
         Area          - study area in km^2 (user-supplied)
         Sample.Label  - camera/site identifier
-        Effort        - active camera-days per site in the date range
+        Effort        - temporal effort = operating_seconds / snapshot_interval_seconds
         distance      - detection distance in metres (NA for zero-detection sites)
         object        - unique detection ID (NA for zero-detection sites)
 
@@ -107,7 +154,19 @@ def build_distance_flatfile(task_ids, survey_ids, region_label, species, trapgro
     if not task_ids or not survey_ids:
         return empty
 
-    # Site operation window + Sample.Label identity
+    user_start = pd.to_datetime(startDate) if startDate else None
+    user_end = pd.to_datetime(endDate) if endDate else None
+
+    image_join = and_(
+        Image.camera_id == Camera.id,
+        Image.corrected_timestamp != None,
+    )
+    if user_start is not None:
+        image_join = and_(image_join, Image.corrected_timestamp >= user_start)
+    if user_end is not None:
+        image_join = and_(image_join, Image.corrected_timestamp <= user_end)
+
+    # Selected camera sites with optional image timestamps (outer join keeps zero-image sites)
     siteQuery = db.session.query(
         Trapgroup.id,
         Trapgroup.tag,
@@ -117,30 +176,18 @@ def build_distance_flatfile(task_ids, survey_ids, region_label, species, trapgro
         func.max(Image.corrected_timestamp),
     )\
     .join(Camera, Trapgroup.id == Camera.trapgroup_id)\
-    .join(Image)\
+    .outerjoin(Image, image_join)\
     .outerjoin(Sitegroup, Trapgroup.sitegroups)\
     .filter(Trapgroup.survey_id.in_(survey_ids))\
-    .filter(Image.corrected_timestamp != None)\
-    .group_by(Trapgroup.id)
-
-    if startDate:
-        siteQuery = siteQuery.filter(Image.corrected_timestamp >= startDate)
-    if endDate:
-        siteQuery = siteQuery.filter(Image.corrected_timestamp <= endDate)
-
-    if trapgroups != '0' and trapgroups != '-1' and groups != '0' and groups != '-1':
-        siteQuery = siteQuery.filter(or_(Trapgroup.id.in_(trapgroups), Sitegroup.id.in_(groups)))
-    elif trapgroups != '0' and trapgroups != '-1':
-        siteQuery = siteQuery.filter(Trapgroup.id.in_(trapgroups))
-    elif groups != '0' and groups != '-1':
-        siteQuery = siteQuery.filter(Sitegroup.id.in_(groups))
+    .group_by(Trapgroup.id, Trapgroup.tag, Trapgroup.latitude, Trapgroup.longitude)
+    siteQuery = _apply_distance_site_filters(siteQuery, trapgroups, groups)
 
     site_df = pd.DataFrame(
         siteQuery.all(),
         columns=['id', 'site_tag', 'latitude', 'longitude', 'first_date', 'last_date']
     )
     if site_df.empty:
-        return pd.DataFrame(columns=['Region.Label', 'Area', 'Sample.Label', 'Effort', 'distance', 'object'])
+        return empty
 
     site_df = site_df.groupby(['site_tag', 'latitude', 'longitude']).agg({
         'first_date': 'min',
@@ -150,54 +197,18 @@ def build_distance_flatfile(task_ids, survey_ids, region_label, species, trapgro
         lambda r: _site_sample_label(r['site_tag'], r['latitude'], r['longitude']),
         axis=1
     )
-
-    # Effort = unique active camera-days per site
-    effortQuery = db.session.query(
-        Trapgroup.tag,
-        Trapgroup.latitude,
-        Trapgroup.longitude,
-        Image.corrected_timestamp,
-    )\
-    .join(Camera, Trapgroup.id == Camera.trapgroup_id)\
-    .join(Image)\
-    .outerjoin(Sitegroup, Trapgroup.sitegroups)\
-    .filter(Trapgroup.survey_id.in_(survey_ids))\
-    .filter(Image.corrected_timestamp != None)
-
-    if startDate:
-        effortQuery = effortQuery.filter(Image.corrected_timestamp >= startDate)
-    if endDate:
-        effortQuery = effortQuery.filter(Image.corrected_timestamp <= endDate)
-
-    if trapgroups != '0' and trapgroups != '-1' and groups != '0' and groups != '-1':
-        effortQuery = effortQuery.filter(or_(Trapgroup.id.in_(trapgroups), Sitegroup.id.in_(groups)))
-    elif trapgroups != '0' and trapgroups != '-1':
-        effortQuery = effortQuery.filter(Trapgroup.id.in_(trapgroups))
-    elif groups != '0' and groups != '-1':
-        effortQuery = effortQuery.filter(Sitegroup.id.in_(groups))
-
-    effort_df = pd.DataFrame(
-        effortQuery.all(),
-        columns=['site_tag', 'latitude', 'longitude', 'timestamp']
-    )
-    if effort_df.empty:
-        return pd.DataFrame(columns=['Region.Label', 'Area', 'Sample.Label', 'Effort', 'distance', 'object'])
-
-    effort_df['timestamp'] = pd.to_datetime(effort_df['timestamp'])
-    effort_df['date'] = effort_df['timestamp'].dt.date
-    effort_df['Sample.Label'] = effort_df.apply(
-        lambda r: _site_sample_label(r['site_tag'], r['latitude'], r['longitude']),
+    site_df['operating_seconds'] = site_df.apply(
+        lambda r: _operating_seconds_for_site(user_start, user_end, r['first_date'], r['last_date']),
         axis=1
     )
-    effort_days = (
-        effort_df.groupby('Sample.Label')['date']
-        .nunique()
-        .reset_index()
-        .rename(columns={'date': 'Effort'})
+    site_df['Effort'] = site_df['operating_seconds'].apply(
+        lambda s: _snapshot_effort(s, snapshot_interval_seconds)
     )
+    site_df = site_df[site_df['Effort'] > 0].copy()
+    if site_df.empty:
+        return empty
 
-    site_effort = site_df[['Sample.Label']].drop_duplicates().merge(effort_days, on='Sample.Label', how='left')
-    site_effort['Effort'] = site_effort['Effort'].fillna(0).astype(float)
+    site_effort = site_df[['Sample.Label', 'Effort']].drop_duplicates()
 
     # Detection rows: one per detection with a measured distance for the selected species
     detectionQuery = db.session.query(
@@ -340,7 +351,7 @@ def _distance_results_from_r(r_results):
     return status, error, distance_results
 
 @app.task(name='WorkR.calculate_distance_sampling', bind=True, soft_time_limit=82800)
-def calculate_distance_sampling(self, task_ids, species, trapgroups, groups, startDate, endDate, area_km2, fov_degrees, user_id, folder, bucket, csv, left_trunc=None, right_trunc=None):
+def calculate_distance_sampling(self, task_ids, species, trapgroups, groups, startDate, endDate, area_km2, fov_degrees, user_id, folder, bucket, csv, left_trunc=None, right_trunc=None, snapshot_interval_seconds=2.0):
     '''Calculates camera-trap distance sampling density with R.'''
     try:
         pandas2ri.activate()
@@ -380,6 +391,9 @@ def calculate_distance_sampling(self, task_ids, species, trapgroups, groups, sta
                 status = 'FAILURE'
                 error = 'No accessible tasks found for the selected surveys.'
             else:
+                if snapshot_interval_seconds is None or float(snapshot_interval_seconds) <= 0:
+                    snapshot_interval_seconds = 2.0
+
                 flatfile = build_distance_flatfile(
                     task_ids,
                     survey_ids,
@@ -390,6 +404,7 @@ def calculate_distance_sampling(self, task_ids, species, trapgroups, groups, sta
                     startDate,
                     endDate,
                     area_km2,
+                    snapshot_interval_seconds=float(snapshot_interval_seconds),
                 )
 
                 file_prefix = _distance_sampling_filename_prefix(user_name, species)
@@ -400,7 +415,7 @@ def calculate_distance_sampling(self, task_ids, species, trapgroups, groups, sta
                         fileName = folder + '/docs/' + file_prefix + '_Flatfile.csv'
                         temp_file = open(temp_file.name, 'rb')
                         s3client.put_object(Bucket=bucket, Key=fileName, Body=temp_file)
-                        flatfile_url = 'https://' + bucket + '.s3.amazonaws.com/' + fileName
+                        flatfile_url = 'https://' + bucket + '.s3.amazonaws.com/' + fileName.replace('+','%2B').replace('?','%3F').replace('#','%23').replace('\\','%5C')
                         distance_results = {
                             'flatfile_url': flatfile_url
                         }
@@ -446,7 +461,7 @@ def calculate_distance_sampling(self, task_ids, species, trapgroups, groups, sta
                             fileName = folder + '/docs/' + file_prefix + '_' + datetime.now().strftime('%Y-%m-%d_%H:%M:%S') + '.JPG'
                             with open(plot_file + '.JPG', 'rb') as plot_handle:
                                 s3client.put_object(Bucket=bucket, Key=fileName, Body=plot_handle)
-                            distance_results['plot_url'] = 'https://' + bucket + '.s3.amazonaws.com/' + fileName
+                            distance_results['plot_url'] = 'https://' + bucket + '.s3.amazonaws.com/' + fileName.replace('+','%2B').replace('?','%3F').replace('#','%23').replace('\\','%5C')
 
                         if distance_results.get('status') == 'FAILURE':
                             status = 'FAILURE'

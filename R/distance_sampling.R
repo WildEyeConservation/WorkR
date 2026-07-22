@@ -20,6 +20,7 @@ calculate_distance_sampling <- function(flatfile, fov_degrees, left_trunc = NA, 
   # Camera-trap distance sampling (CTDS) v1: half-normal detection function + density via dht2.
   #
   # flatfile: data.frame with columns Region.Label, Area, Sample.Label, Effort, distance, object
+  # Effort = operating_seconds / snapshot_interval (CTDS temporal effort for dht2)
   # fov_degrees: camera field of view in degrees (sample_fraction = fov / 360)
   # left_trunc / right_trunc: optional truncation distances in metres (NA = none)
   # plot_file: optional path prefix (without extension) for detection function JPEG
