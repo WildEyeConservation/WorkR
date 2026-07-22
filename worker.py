@@ -363,6 +363,38 @@ def _distance_results_from_r(r_results):
         except Exception:
             return None
 
+    def _safe_str(name):
+        try:
+            value = r_results.rx2(name)[0]
+            if str(value) in ('NULL', 'NA', 'NA_character_'):
+                return None
+            return str(value)
+        except Exception:
+            return None
+
+    def _safe_bool(name):
+        try:
+            return bool(r_results.rx2(name)[0])
+        except Exception:
+            return False
+
+    def _r_df_to_records(name):
+        try:
+            df = pd.DataFrame(r_results.rx2(name))
+            if df.empty:
+                return []
+            df = df.replace([np.inf, -np.inf], 'Inf')
+            df = df.replace([np.nan], 'NA')
+            return df.to_dict(orient='records')
+        except Exception:
+            return []
+
+    def _r_str_vector_to_list(name):
+        try:
+            return [str(x) for x in list(r_results.rx2(name))]
+        except Exception:
+            return []
+
     distance_results = {
         'status': status,
         'error': error,
@@ -375,8 +407,20 @@ def _distance_results_from_r(r_results):
         'n_detections': _safe_int('n_detections'),
         'n_sites': _safe_int('n_sites'),
         'sample_fraction': _safe_float('sample_fraction'),
-        'model_key': str(r_results.rx2('model_key')[0]),
+        'model_key': _safe_str('model_key'),
+        'model_name': _safe_str('model_name'),
         'effective_detection_radius': _safe_float('effective_detection_radius'),
+        'left_trunc_effective': _safe_float('left_trunc_effective'),
+        'right_trunc_effective': _safe_float('right_trunc_effective'),
+        'used_cutpoints': _safe_bool('used_cutpoints'),
+        'cutpoints': _safe_str('cutpoints'),
+        'selection_method': _safe_str('selection_method'),
+        'chat': _safe_float('chat'),
+        'model_warnings': _r_str_vector_to_list('model_warnings'),
+        'qaic_uniform': _r_df_to_records('qaic_uniform'),
+        'qaic_half_normal': _r_df_to_records('qaic_half_normal'),
+        'qaic_hazard_rate': _r_df_to_records('qaic_hazard_rate'),
+        'chi2_comparison': _r_df_to_records('chi2_comparison'),
         'plot_url': None,
     }
     return status, error, distance_results
