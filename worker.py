@@ -135,7 +135,33 @@ def _snapshot_effort(operating_seconds, snapshot_interval_seconds):
         raise ValueError('snapshot_interval_seconds must be greater than 0.')
     return operating_seconds / interval
 
-def build_distance_flatfile(task_ids, survey_ids, region_label, species, trapgroups, groups, startDate, endDate, area_km2, snapshot_interval_seconds=2.0):
+def _time_to_independence_timedelta(time_to_independence, time_to_independence_unit):
+    '''Converts a time-to-independence setting to a timedelta, or None if thinning is disabled.'''
+    if time_to_independence is None or time_to_independence == '':
+        return None
+    tti = float(time_to_independence)
+    if tti <= 0:
+        return None
+    if time_to_independence_unit == 's':
+        seconds = int(tti)
+    elif time_to_independence_unit == 'h':
+        seconds = int(tti) * 3600
+    else:
+        seconds = int(tti) * 60
+    return timedelta(seconds=seconds)
+
+def _thin_detections_for_independence(detection_df, time_to_independence, time_to_independence_unit):
+    '''Keeps one detection per site per independent time window (same pattern as occupancy).'''
+    tti = _time_to_independence_timedelta(time_to_independence, time_to_independence_unit)
+    if tti is None or detection_df.empty:
+        return detection_df
+    df = detection_df.sort_values(by=['Sample.Label', 'timestamp']).copy()
+    df['timedelta'] = df.groupby('Sample.Label')['timestamp'].diff()
+    df['timedelta'] = df['timedelta'].fillna(timedelta(seconds=9999999))
+    df = df[df['timedelta'] >= tti]
+    return df.drop(columns=['timedelta'])
+
+def build_distance_flatfile(task_ids, survey_ids, region_label, species, trapgroups, groups, startDate, endDate, area_km2, snapshot_interval_seconds=2.0, time_to_independence=30, time_to_independence_unit='m'):
     '''
     Builds a Distance-package flatfile DataFrame for camera-trap distance sampling.
 
@@ -272,6 +298,11 @@ def build_distance_flatfile(task_ids, survey_ids, region_label, species, trapgro
             lambda r: _site_sample_label(r['site_tag'], r['latitude'], r['longitude']),
             axis=1
         )
+        detection_df = _thin_detections_for_independence(
+            detection_df,
+            time_to_independence,
+            time_to_independence_unit,
+        )
         detection_df = detection_df.merge(site_effort, on='Sample.Label', how='inner')
         detection_df['Region.Label'] = region_label
         detection_df['Area'] = float(area_km2)
@@ -351,7 +382,7 @@ def _distance_results_from_r(r_results):
     return status, error, distance_results
 
 @app.task(name='WorkR.calculate_distance_sampling', bind=True, soft_time_limit=82800)
-def calculate_distance_sampling(self, task_ids, species, trapgroups, groups, startDate, endDate, area_km2, fov_degrees, user_id, folder, bucket, csv, left_trunc=None, right_trunc=None, snapshot_interval_seconds=2.0):
+def calculate_distance_sampling(self, task_ids, species, trapgroups, groups, startDate, endDate, area_km2, fov_degrees, user_id, folder, bucket, csv, left_trunc=None, right_trunc=None, snapshot_interval_seconds=2.0, time_to_independence=30, time_to_independence_unit='m'):
     '''Calculates camera-trap distance sampling density with R.'''
     try:
         pandas2ri.activate()
@@ -405,6 +436,8 @@ def calculate_distance_sampling(self, task_ids, species, trapgroups, groups, sta
                     endDate,
                     area_km2,
                     snapshot_interval_seconds=float(snapshot_interval_seconds),
+                    time_to_independence=time_to_independence,
+                    time_to_independence_unit=time_to_independence_unit,
                 )
 
                 file_prefix = _distance_sampling_filename_prefix(user_name, species)
