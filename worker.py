@@ -35,6 +35,7 @@ from datetime import datetime, timedelta
 import tempfile
 import boto3
 import json
+import math
 
 REDIS_IP = os.environ.get('REDIS_IP') or '127.0.0.1'
 app = Celery('WorkR', broker='redis://'+REDIS_IP,backend='redis://'+REDIS_IP,broker_transport_options={'visibility_timeout': 1209600},result_expires=1209600,task_acks_late=True,worker_prefetch_multiplier=1)
@@ -89,7 +90,7 @@ def _site_sample_label(site_tag, latitude, longitude):
     return '{}_{:.4f}_{:.4f}'.format(site_tag, float(latitude), float(longitude))
 
 def _apply_distance_site_filters(query, trapgroups, groups):
-    '''Applies trapgroup / sitegroup filters used by distance-sampling queries.'''
+    '''Applies trapgroup / sitegroup filters used by distance-sampling and tte abundance queries.'''
     if trapgroups != '0' and trapgroups != '-1' and groups != '0' and groups != '-1':
         return query.filter(or_(Trapgroup.id.in_(trapgroups), Sitegroup.id.in_(groups)))
     if trapgroups != '0' and trapgroups != '-1':
@@ -656,6 +657,413 @@ def calculate_distance_sampling(self, task_ids, species, trapgroups, groups, sta
         db.session.remove()
 
     return {'status': status, 'error': error, 'distance_results': distance_results}
+
+def _compute_tte_viewable_area_from_fov(fov_degrees, distances):
+    '''Derives effective detection radius (95th percentile) and sector viewable area (m²).'''
+    if not distances:
+        return None, None
+    edr = float(np.percentile(distances, 95))
+    if edr <= 0 or fov_degrees is None or float(fov_degrees) <= 0:
+        return None, None
+    area = (float(fov_degrees) / 360.0) * math.pi * (edr ** 2)
+    return edr, area
+
+def _species_label_ids(task_ids, species):
+    '''Resolves selected species descriptions to label IDs including child labels.'''
+    if isinstance(species, str):
+        species = [species]
+    labels = db.session.query(Label).filter(Label.description.in_(species)).filter(Label.task_id.in_(task_ids)).all()
+    label_list = []
+    for label in labels:
+        label_list.append(label.id)
+        label_list.extend(getChildList(label, int(label.task_id)))
+    return label_list
+
+def _apply_tte_detection_filters(detectionQuery, task_ids, species, trapgroups, groups, startDate, endDate):
+    '''Applies species, date, and site filters shared by TTE detection queries.'''
+    detectionQuery = detectionQuery.filter(Labelgroup.task_id.in_(task_ids))
+
+    if startDate:
+        detectionQuery = detectionQuery.filter(Image.corrected_timestamp >= startDate)
+    if endDate:
+        detectionQuery = detectionQuery.filter(Image.corrected_timestamp <= endDate)
+
+    if species and species != '0':
+        label_list = _species_label_ids(task_ids, species)
+        detectionQuery = detectionQuery.filter(Labelgroup.labels.any(Label.id.in_(label_list)))
+    else:
+        vhl = db.session.query(Label).get(vhl_id)
+        label_list = [vhl_id, nothing_id, knocked_id]
+        for task_id in task_ids:
+            label_list.extend(getChildList(vhl, int(task_id)))
+        detectionQuery = detectionQuery.filter(~Labelgroup.labels.any(Label.id.in_(label_list)))
+
+    detectionQuery = _apply_distance_site_filters(detectionQuery, trapgroups, groups)
+    return detectionQuery
+
+def build_space_ntime_tte_data(task_ids, survey_ids, species, trapgroups, groups, startDate, endDate, viewable_area_m2):
+    '''
+    Builds spaceNtime df and deploy data.frames for TTE abundance.
+
+    df columns: cam (integer), datetime, count
+    deploy columns: cam, start, end, area (m²)
+    '''
+    empty_df = pd.DataFrame(columns=['cam', 'datetime', 'count'])
+    empty_deploy = pd.DataFrame(columns=['cam', 'start', 'end', 'area'])
+    empty_meta = {'n_detections': 0, 'n_cameras': 0, 'distances': []}
+
+    if not task_ids or not survey_ids:
+        return empty_df, empty_deploy, None, None, empty_meta
+
+    user_start = pd.to_datetime(startDate) if startDate else None
+    user_end = pd.to_datetime(endDate) if endDate else None
+
+    image_join = and_(
+        Image.camera_id == Camera.id,
+        Image.corrected_timestamp != None,
+    )
+    if user_start is not None:
+        image_join = and_(image_join, Image.corrected_timestamp >= user_start)
+    if user_end is not None:
+        image_join = and_(image_join, Image.corrected_timestamp <= user_end)
+
+    siteQuery = db.session.query(
+        Trapgroup.id,
+        Trapgroup.tag,
+        Trapgroup.latitude,
+        Trapgroup.longitude,
+        func.min(Image.corrected_timestamp),
+        func.max(Image.corrected_timestamp),
+    )\
+    .join(Camera, Trapgroup.id == Camera.trapgroup_id)\
+    .outerjoin(Image, image_join)\
+    .outerjoin(Sitegroup, Trapgroup.sitegroups)\
+    .filter(Trapgroup.survey_id.in_(survey_ids))\
+    .group_by(Trapgroup.id, Trapgroup.tag, Trapgroup.latitude, Trapgroup.longitude)
+    siteQuery = _apply_distance_site_filters(siteQuery, trapgroups, groups)
+
+    site_df = pd.DataFrame(
+        siteQuery.all(),
+        columns=['trapgroup_id', 'site_tag', 'latitude', 'longitude', 'first_date', 'last_date']
+    )
+    if site_df.empty:
+        return empty_df, empty_deploy, None, None, empty_meta
+
+    site_df = site_df.groupby(['site_tag', 'latitude', 'longitude']).agg({
+        'trapgroup_id': 'min',
+        'first_date': 'min',
+        'last_date': 'max',
+    }).reset_index()
+    site_df['Sample.Label'] = site_df.apply(
+        lambda r: _site_sample_label(r['site_tag'], r['latitude'], r['longitude']),
+        axis=1
+    )
+    site_df = site_df.sort_values('Sample.Label').reset_index(drop=True)
+    site_df['cam'] = site_df.index + 1
+    cam_by_label = dict(zip(site_df['Sample.Label'], site_df['cam']))
+    trapgroup_to_cam = dict(zip(site_df['trapgroup_id'], site_df['cam']))
+
+    deploy_rows = []
+    for _, row in site_df.iterrows():
+        if user_start is not None:
+            op_start = pd.to_datetime(user_start).normalize()
+        elif row['first_date'] is not None and not pd.isna(row['first_date']):
+            op_start = pd.to_datetime(row['first_date']).normalize()
+        else:
+            continue
+
+        if user_end is not None:
+            op_end = pd.to_datetime(user_end)
+        elif row['last_date'] is not None and not pd.isna(row['last_date']):
+            op_end = pd.to_datetime(row['last_date'])
+        else:
+            continue
+
+        if op_end < op_start:
+            continue
+
+        deploy_rows.append({
+            'cam': int(row['cam']),
+            'start': op_start,
+            'end': op_end,
+            'area': float(viewable_area_m2),
+        })
+
+    deploy = pd.DataFrame(deploy_rows)
+    if deploy.empty:
+        return empty_df, empty_deploy, None, None, empty_meta
+
+    detectionQuery = db.session.query(
+        Detection.id,
+        Detection.distance,
+        Image.corrected_timestamp,
+        Trapgroup.id,
+        Trapgroup.tag,
+        Trapgroup.latitude,
+        Trapgroup.longitude,
+    )\
+    .join(Image)\
+    .join(Camera)\
+    .join(Trapgroup)\
+    .join(Labelgroup)\
+    .join(Label, Labelgroup.labels)\
+    .outerjoin(Sitegroup, Trapgroup.sitegroups)\
+    .filter(Trapgroup.survey_id.in_(survey_ids))\
+    .filter(Image.corrected_timestamp != None)\
+    .filter(~Detection.status.in_(Config.DET_IGNORE_STATUSES))\
+    .filter(or_(and_(Detection.source == model, Detection.score > Config.DETECTOR_THRESHOLDS[model]) for model in Config.DETECTOR_THRESHOLDS))\
+    .filter(Detection.static == False)
+
+    detectionQuery = _apply_tte_detection_filters(
+        detectionQuery, task_ids, species, trapgroups, groups, startDate, endDate
+    )
+
+    detection_df = pd.DataFrame(
+        detectionQuery.all(),
+        columns=['detection_id', 'distance', 'timestamp', 'trapgroup_id', 'site_tag', 'latitude', 'longitude']
+    )
+
+    distances = []
+    if not detection_df.empty:
+        detection_df['Sample.Label'] = detection_df.apply(
+            lambda r: _site_sample_label(r['site_tag'], r['latitude'], r['longitude']),
+            axis=1
+        )
+        detection_df = detection_df[detection_df['Sample.Label'].isin(cam_by_label)].copy()
+        detection_df['cam'] = detection_df['trapgroup_id'].map(trapgroup_to_cam)
+        detection_df = detection_df[detection_df['cam'].notna()].copy()
+        detection_df['count'] = 1
+        df = detection_df[['cam', 'timestamp', 'count']].rename(columns={'timestamp': 'datetime'}).copy()
+        df['cam'] = df['cam'].astype(int)
+        distances = pd.to_numeric(detection_df['distance'], errors='coerce').dropna().tolist()
+    else:
+        df = empty_df.copy()
+
+    study_start = user_start if user_start is not None else deploy['start'].min()
+    study_end = user_end if user_end is not None else deploy['end'].max()
+
+    meta = {
+        'n_detections': int(len(df)),
+        'n_cameras': int(deploy['cam'].nunique()),
+        'distances': distances,
+    }
+    return df, deploy, study_start, study_end, meta
+
+def _tte_abundance_filename_prefix(user_name, species):
+    fileName = user_name + '_TTE_Abundance'
+    if species and species != '0':
+        if isinstance(species, str):
+            species = [species]
+        for specie in species:
+            fileName += '_' + specie
+    return fileName
+
+def _s3_docs_url(bucket, fileName):
+    return 'https://' + bucket + '.s3.amazonaws.com/' + fileName.replace('+', '%2B').replace('?', '%3F').replace('#', '%23').replace('\\', '%5C')
+
+def _tte_results_from_r(r_results):
+    status = str(r_results.rx2('status')[0])
+    try:
+        error_val = r_results.rx2('error')[0]
+        error = None if str(error_val) in ('NULL', 'NA') else str(error_val)
+    except Exception:
+        error = None
+
+    def _safe_float(name):
+        try:
+            value = float(r_results.rx2(name)[0])
+            if np.isnan(value):
+                return None
+            return value
+        except Exception:
+            return None
+
+    def _safe_int(name):
+        try:
+            return int(r_results.rx2(name)[0])
+        except Exception:
+            return None
+
+    tte_results = {
+        'status': status,
+        'error': error,
+        'N': _safe_float('N'),
+        'SE': _safe_float('SE'),
+        'LCI': _safe_float('LCI'),
+        'UCI': _safe_float('UCI'),
+        'n_occasions': _safe_int('n_occasions'),
+        'sampling_period_seconds': _safe_float('sampling_period_seconds'),
+    }
+    return status, error, tte_results
+
+@app.task(name='WorkR.calculate_space_ntime_tte', bind=True, soft_time_limit=82800)
+def calculate_space_ntime_tte(
+    self,
+    task_ids,
+    species,
+    trapgroups,
+    groups,
+    startDate,
+    endDate,
+    area_mode,
+    viewable_area_m2,
+    fov_degrees,
+    species_speed_m_hr,
+    study_area_m2,
+    nper,
+    time_btw_seconds,
+    user_id,
+    folder,
+    bucket,
+    csv,
+):
+    '''Calculates camera-trap TTE abundance with spaceNtime in R.'''
+    try:
+        pandas2ri.activate()
+        tte_results = {}
+        status = 'SUCCESS'
+        error = None
+        user_name = db.session.query(User.username).filter(User.id == user_id).first()[0]
+
+        if task_ids:
+            if task_ids[0] == '0':
+                tasks = surveyPermissionsSQ(
+                    db.session.query(Task.id, Task.survey_id, Survey.name)
+                        .join(Survey)
+                        .filter(Task.name != 'default')
+                        .filter(~Task.name.contains('_o_l_d_'))
+                        .filter(~Task.name.contains('_copying'))
+                        .group_by(Task.survey_id)
+                        .order_by(Task.id),
+                    user_id,
+                    'read'
+                ).distinct().all()
+            else:
+                tasks = surveyPermissionsSQ(
+                    db.session.query(Task.id, Task.survey_id, Survey.name)
+                        .join(Survey)
+                        .filter(Task.id.in_(task_ids)),
+                    user_id,
+                    'read'
+                ).distinct().all()
+
+            task_ids = [r[0] for r in tasks]
+            survey_ids = list(set([r[1] for r in tasks]))
+
+            if not task_ids:
+                status = 'FAILURE'
+                error = 'No accessible tasks found for the selected surveys.'
+            else:
+                if species_speed_m_hr is None or float(species_speed_m_hr) <= 0:
+                    species_speed_m_hr = 30.0
+
+                effective_detection_radius_m = None
+                if area_mode == 'fov':
+                    _, _, _, _, fov_meta = build_space_ntime_tte_data(
+                        task_ids, survey_ids, species, trapgroups, groups,
+                        startDate, endDate, 1.0,
+                    )
+                    effective_detection_radius_m, computed_area = _compute_tte_viewable_area_from_fov(
+                        fov_degrees, fov_meta.get('distances') or [],
+                    )
+                    if computed_area is None:
+                        status = 'FAILURE'
+                        error = 'Could not derive viewable area from field of view and detection distances.'
+                        viewable_area_m2 = None
+                    else:
+                        viewable_area_m2 = computed_area
+
+                if status == 'SUCCESS':
+                    df, deploy, study_start, study_end, meta = build_space_ntime_tte_data(
+                        task_ids, survey_ids, species, trapgroups, groups,
+                        startDate, endDate, viewable_area_m2,
+                    )
+                else:
+                    df = pd.DataFrame(columns=['cam', 'datetime', 'count'])
+                    deploy = pd.DataFrame(columns=['cam', 'start', 'end', 'area'])
+                    study_start = None
+                    study_end = None
+                    meta = {'n_detections': 0, 'n_cameras': 0, 'distances': []}
+
+                file_prefix = _tte_abundance_filename_prefix(user_name, species)
+
+                if status == 'SUCCESS' and csv:
+                    tte_results = {}
+                    with tempfile.NamedTemporaryFile(delete=True, suffix='.csv') as temp_file:
+                        df.to_csv(temp_file.name, index=False)
+                        fileName = folder + '/docs/' + file_prefix + '_Detections.csv'
+                        with open(temp_file.name, 'rb') as handle:
+                            s3client.put_object(Bucket=bucket, Key=fileName, Body=handle)
+                        tte_results['detections_url'] = _s3_docs_url(bucket, fileName)
+
+                    with tempfile.NamedTemporaryFile(delete=True, suffix='.csv') as temp_file:
+                        deploy.to_csv(temp_file.name, index=False)
+                        fileName = folder + '/docs/' + file_prefix + '_Deploy.csv'
+                        with open(temp_file.name, 'rb') as handle:
+                            s3client.put_object(Bucket=bucket, Key=fileName, Body=handle)
+                        tte_results['deploy_url'] = _s3_docs_url(bucket, fileName)
+                elif status == 'SUCCESS' and (deploy.empty or df.empty):
+                    tte_results = {
+                        'status': 'FAILURE',
+                        'error': 'No camera deployments or detections found for the selected filters.',
+                        'N': None, 'SE': None, 'LCI': None, 'UCI': None,
+                        'n_detections': meta.get('n_detections', 0),
+                        'n_cameras': meta.get('n_cameras', 0),
+                        'n_occasions': 0,
+                        'viewable_area_m2': viewable_area_m2,
+                        'effective_detection_radius_m': effective_detection_radius_m,
+                        'species_speed_m_hr': float(species_speed_m_hr),
+                        'study_area_m2': float(study_area_m2),
+                        'sampling_period_seconds': None,
+                        'area_mode': area_mode,
+                    }
+                    status = 'FAILURE'
+                    error = tte_results['error']
+                elif status == 'SUCCESS':
+                    df_r = robjects.conversion.py2rpy(df)
+                    deploy_r = robjects.conversion.py2rpy(deploy)
+
+                    r = robjects.r
+                    r.source('R/space_ntime.R')
+                    r_results = r.calculate_space_ntime_tte(
+                        df_r,
+                        deploy_r,
+                        pd.to_datetime(study_start).strftime('%Y-%m-%d %H:%M:%S'),
+                        pd.to_datetime(study_end).strftime('%Y-%m-%d %H:%M:%S'),
+                        float(species_speed_m_hr),
+                        float(study_area_m2),
+                        int(nper),
+                        float(time_btw_seconds),
+                    )
+                    r_status, r_error, tte_results = _tte_results_from_r(r_results)
+                    tte_results['n_detections'] = meta.get('n_detections', 0)
+                    tte_results['n_cameras'] = meta.get('n_cameras', 0)
+                    tte_results['viewable_area_m2'] = float(viewable_area_m2)
+                    tte_results['effective_detection_radius_m'] = effective_detection_radius_m
+                    tte_results['species_speed_m_hr'] = float(species_speed_m_hr)
+                    tte_results['study_area_m2'] = float(study_area_m2)
+                    tte_results['area_mode'] = area_mode
+                    if area_mode == 'fov' and fov_degrees is not None:
+                        tte_results['fov_degrees'] = float(fov_degrees)
+
+                    if r_status == 'FAILURE':
+                        status = 'FAILURE'
+                        error = tte_results.get('error') or r_error or 'TTE abundance analysis failed.'
+
+    except Exception as exc:
+        print(' ')
+        print('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+        print(traceback.format_exc())
+        print('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+        print(' ')
+        status = 'FAILURE'
+        error = str(exc)
+        tte_results = {}
+
+    finally:
+        db.session.remove()
+
+    return {'status': status, 'error': error, 'tte_results': tte_results}
 
 @app.task(name='WorkR.calculate_activity_pattern',bind=True,soft_time_limit=82800)
 def calculate_activity_pattern(self,task_ids,trapgroups,groups,species,baseUnit,user_id,startDate,endDate,unit,centre,time,overlap, bucket, folder, csv, timeToIndependence, timeToIndependenceUnit):
