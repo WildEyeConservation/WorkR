@@ -43,3 +43,8 @@ def calculate_spatial_capture_recapture(self, species, user_id, task_ids, trapgr
 def calculate_distance_sampling(self, task_ids, species, trapgroups, groups, startDate, endDate, area_km2, fov_degrees, user_id, folder, bucket, csv, left_trunc=None, right_trunc=None, snapshot_interval_seconds=2.0, time_to_independence=30, time_to_independence_unit='m', apply_activity_multiplier=False, camera_hours_per_day=24, activity_time_mode='clock'):
     '''Stub: distance sampling runs on statistics-queue workers (dev-morpho-master).'''
     return {'status': None, 'error': None, 'distance_results': None}
+
+@app.task(name='WorkR.calculate_space_ntime_tte', bind=True, soft_time_limit=82800)
+def calculate_space_ntime_tte(self, task_ids, species, trapgroups, groups, startDate, endDate, area_mode, viewable_area_m2, fov_degrees, species_speed_m_hr, study_area_m2, nper, time_btw_seconds, user_id, folder, bucket, csv):
+    '''Stub: TTE abundance runs on statistics-queue workers (dev-morpho-master).'''
+    return {'status': None, 'error': None, 'tte_results': None}
