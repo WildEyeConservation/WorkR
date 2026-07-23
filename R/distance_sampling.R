@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 library(Distance)
+library(activity)
 
 MIN_FOR_BINNING <- 25L
 MIN_BINS <- 3L
@@ -46,7 +47,14 @@ MIN_PER_BIN <- 3L
     qaic_uniform = data.frame(),
     qaic_half_normal = data.frame(),
     qaic_hazard_rate = data.frame(),
-    chi2_comparison = data.frame()
+    chi2_comparison = data.frame(),
+    activity_multiplier_applied = FALSE,
+    activity_rate = NA_real_,
+    activity_rate_se = NA_real_,
+    camera_hours_per_day = NA_real_,
+    activity_time_mode = NA_character_,
+    utc_offset_hours = NA_real_,
+    timezone = NA_character_
   )
 }
 
@@ -332,12 +340,141 @@ MIN_PER_BIN <- 3L
   sqrt(p_a * w^2)
 }
 
-calculate_distance_sampling <- function(flatfile, fov_degrees, left_trunc = NA, right_trunc = NA, plot_file = NULL) {
+.detection_times_to_radians <- function(detection_times, lat, lng, utc_offset_hours, activity_time_mode) {
+  if (is.null(detection_times) || length(detection_times) < 1L) {
+    stop("Detection times are required when applying an activity multiplier.")
+  }
+  pos.time <- as.POSIXct(detection_times)
+  if (all(is.na(pos.time))) {
+    stop("Could not parse detection times for activity estimation.")
+  }
+  if (activity_time_mode == "solar") {
+    if (is.na(lat) || is.na(lng)) {
+      stop("Latitude and longitude are required for solar-time activity estimation.")
+    }
+    offset <- as.numeric(utc_offset_hours)
+    if (!is.finite(offset)) {
+      offset <- 0
+    }
+    time_solar <- solartime::solartime(pos.time, lat, lng, offset)
+    return(list(radians = time_solar$solar, utc_offset_hours = offset))
+  }
+  list(
+    radians = gettime(pos.time, scale = "radian"),
+    utc_offset_hours = NA_real_
+  )
+}
+
+# Public helper so flatfile users can reproduce the temporal availability multiplier.
+# For activity_time_mode = "solar", supply utc_offset_hours from TrapTagger (or read
+# Activity_Params.csv from a CSV export). R uses solartime::solartime() with lat/lng and
+# utc_offset_hours; no additional timezone packages are required.
+build_activity_multiplier <- function(
+  detection_times,
+  lat,
+  lng,
+  camera_hours_per_day = 24,
+  activity_time_mode = "clock",
+  utc_offset_hours = 0
+) {
+  .build_activity_multiplier(
+    apply_activity_multiplier = TRUE,
+    detection_times = detection_times,
+    lat = lat,
+    lng = lng,
+    camera_hours_per_day = camera_hours_per_day,
+    activity_time_mode = activity_time_mode,
+    utc_offset_hours = utc_offset_hours
+  )
+}
+
+.build_activity_multiplier <- function(
+  apply_activity_multiplier,
+  detection_times,
+  lat,
+  lng,
+  camera_hours_per_day,
+  activity_time_mode,
+  utc_offset_hours = 0
+) {
+  if (!isTRUE(apply_activity_multiplier)) {
+    return(list(
+      multipliers = NULL,
+      applied = FALSE,
+      rate = NA_real_,
+      se = NA_real_,
+      camera_hours = NA_real_,
+      time_mode = NA_character_,
+      utc_offset_hours = NA_real_
+    ))
+  }
+
+  if (length(detection_times) < 2L) {
+    stop("At least 2 detection times are required to estimate temporal availability.")
+  }
+
+  hours <- as.numeric(camera_hours_per_day)
+  if (!is.finite(hours) || hours <= 0 || hours > 24) {
+    stop("Camera operating hours per day must be greater than 0 and at most 24.")
+  }
+
+  time_mode <- tolower(as.character(activity_time_mode))
+  if (!(time_mode %in% c("clock", "solar"))) {
+    stop("Activity time mode must be 'clock' or 'solar'.")
+  }
+
+  time_conv <- .detection_times_to_radians(
+    detection_times,
+    as.numeric(lat),
+    as.numeric(lng),
+    utc_offset_hours,
+    time_mode
+  )
+  act_result <- fitact(time_conv$radians, sample = "data", reps = 100)
+  prop_camera_time <- hours / 24
+
+  rate <- as.numeric(act_result@act[1]) / prop_camera_time
+  se <- as.numeric(act_result@act[2]) / prop_camera_time
+
+  list(
+    multipliers = list(creation = data.frame(rate = rate, SE = se)),
+    applied = TRUE,
+    rate = rate,
+    se = se,
+    camera_hours = hours,
+    time_mode = time_mode,
+    utc_offset_hours = time_conv$utc_offset_hours
+  )
+}
+
+calculate_distance_sampling <- function(
+  flatfile,
+  fov_degrees,
+  left_trunc = NA,
+  right_trunc = NA,
+  plot_file = NULL,
+  apply_activity_multiplier = FALSE,
+  camera_hours_per_day = 24,
+  detection_times = NULL,
+  lat = NA,
+  lng = NA,
+  utc_offset_hours = 0,
+  activity_time_mode = "clock",
+  timezone = NA_character_
+) {
   # Camera-trap distance sampling with QAIC/chi2_select model selection (Howe et al. 2019).
   #
   # flatfile: Region.Label, Area, Sample.Label, Effort, distance, object
   # left_trunc: optional metres (default 0); right_trunc: optional (default max detection distance)
   # When n >= MIN_FOR_BINNING, distances are binned with auto cutpoints for model selection.
+  # apply_activity_multiplier: when TRUE, temporal availability is estimated with activity::fitact
+  #   and passed to dht2 via multipliers (Howe et al. 2017 CTDS vignette). See also
+  #   build_activity_multiplier() for the standalone multiplier calculation.
+  # activity_time_mode: 'clock' uses wall-clock time of day; 'solar' converts to solar time
+  #   using lat/lng and utc_offset_hours before estimating activity.
+  # utc_offset_hours: local UTC offset in hours for solar-time conversion (TrapTagger supplies this).
+  # timezone: IANA timezone name for reporting only (TrapTagger supplies this from Python).
+  # camera_hours_per_day: hours per 24 h day that cameras were operating (default 24).
 
   result <- .empty_result()
 
@@ -390,6 +527,16 @@ calculate_distance_sampling <- function(flatfile, fov_degrees, left_trunc = NA, 
 
     sample_fraction <- as.numeric(fov_degrees) / 360
 
+    activity <- .build_activity_multiplier(
+      apply_activity_multiplier,
+      detection_times,
+      lat,
+      lng,
+      camera_hours_per_day,
+      activity_time_mode,
+      utc_offset_hours
+    )
+
     dens <- dht2(
       model,
       flatfile = data,
@@ -397,7 +544,8 @@ calculate_distance_sampling <- function(flatfile, fov_degrees, left_trunc = NA, 
       stratification = "geographical",
       sample_fraction = sample_fraction,
       er_est = "P2",
-      convert_units = conversion
+      convert_units = conversion,
+      multipliers = activity$multipliers
     )
 
     drow <- attr(dens, "density")
@@ -439,6 +587,18 @@ calculate_distance_sampling <- function(flatfile, fov_degrees, left_trunc = NA, 
     result$qaic_half_normal <- selection$qaic_half_normal
     result$qaic_hazard_rate <- selection$qaic_hazard_rate
     result$chi2_comparison <- selection$chi2_comparison
+    result$activity_multiplier_applied <- activity$applied
+    result$activity_rate <- activity$rate
+    result$activity_rate_se <- activity$se
+    result$camera_hours_per_day <- activity$camera_hours
+    result$activity_time_mode <- activity$time_mode
+    result$utc_offset_hours <- activity$utc_offset_hours
+    if (isTRUE(activity$applied) && identical(tolower(as.character(activity$time_mode)), "solar")) {
+      tz_name <- as.character(timezone)
+      result$timezone <- if (!is.na(tz_name) && nzchar(tz_name)) tz_name else NA_character_
+    } else {
+      result$timezone <- NA_character_
+    }
 
     if (!is.null(plot_file) && !is.na(plot_file) && nzchar(as.character(plot_file))) {
       jpeg(

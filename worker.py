@@ -161,11 +161,32 @@ def _thin_detections_for_independence(detection_df, time_to_independence, time_t
     df = df[df['timedelta'] >= tti]
     return df.drop(columns=['timedelta'])
 
+def _activity_timezone_context(timestamps, lat, lng):
+    '''Returns UTC offset (hours) and timezone name for solar-time activity conversion.'''
+    if not timestamps or lat is None or lng is None:
+        return 0.0, 'UTC'
+
+    tf = timezonefinder.TimezoneFinder()
+    timezone = tf.timezone_at(lng=float(lng), lat=float(lat))
+    if not timezone:
+        return 0.0, 'UTC'
+
+    tz_obj = pytz.timezone(timezone)
+    ts = timestamps[0]
+    if ts is None:
+        return 0.0, timezone
+
+    if getattr(ts, 'tzinfo', None) is None:
+        tz_now = tz_obj.localize(ts)
+    else:
+        tz_now = ts.astimezone(tz_obj)
+    return tz_now.utcoffset().total_seconds() / 3600, timezone
+
 def build_distance_flatfile(task_ids, survey_ids, region_label, species, trapgroups, groups, startDate, endDate, area_km2, snapshot_interval_seconds=2.0, time_to_independence=30, time_to_independence_unit='m'):
     '''
     Builds a Distance-package flatfile DataFrame for camera-trap distance sampling.
 
-    Columns:
+    Flatfile columns:
         Region.Label  - survey/stratum name
         Area          - study area in km^2 (user-supplied)
         Sample.Label  - camera/site identifier
@@ -175,10 +196,22 @@ def build_distance_flatfile(task_ids, survey_ids, region_label, species, trapgro
 
     Species is applied as a filter only; it is not a flatfile column.
     Caller must resolve task_ids, survey_ids, and region_label (with permissions) first.
+
+    Returns:
+        flatfile: DataFrame with the columns above
+        activity_meta: dict with timestamps (list), lat, lng, utc_offset_hours, timezone
+            passed to R for optional activity multiplier estimation (same thinned detections)
     '''
+    empty_meta = {
+        'timestamps': [],
+        'lat': None,
+        'lng': None,
+        'utc_offset_hours': 0.0,
+        'timezone': 'UTC',
+    }
     empty = pd.DataFrame(columns=['Region.Label', 'Area', 'Sample.Label', 'Effort', 'distance', 'object'])
     if not task_ids or not survey_ids:
-        return empty
+        return empty, empty_meta
 
     user_start = pd.to_datetime(startDate) if startDate else None
     user_end = pd.to_datetime(endDate) if endDate else None
@@ -213,7 +246,7 @@ def build_distance_flatfile(task_ids, survey_ids, region_label, species, trapgro
         columns=['id', 'site_tag', 'latitude', 'longitude', 'first_date', 'last_date']
     )
     if site_df.empty:
-        return empty
+        return empty, empty_meta
 
     site_df = site_df.groupby(['site_tag', 'latitude', 'longitude']).agg({
         'first_date': 'min',
@@ -232,7 +265,7 @@ def build_distance_flatfile(task_ids, survey_ids, region_label, species, trapgro
     )
     site_df = site_df[site_df['Effort'] > 0].copy()
     if site_df.empty:
-        return empty
+        return empty, empty_meta
 
     site_effort = site_df[['Sample.Label', 'Effort']].drop_duplicates()
 
@@ -327,7 +360,23 @@ def build_distance_flatfile(task_ids, survey_ids, region_label, species, trapgro
     flatfile['Effort'] = flatfile['Effort'].astype(float)
     flatfile['Area'] = flatfile['Area'].astype(float)
     flatfile['distance'] = pd.to_numeric(flatfile['distance'], errors='coerce')
-    return flatfile
+
+    if not detection_df.empty:
+        lat = float(detection_df['latitude'].mean())
+        lng = float(detection_df['longitude'].mean())
+        timestamps = detection_df['timestamp'].tolist()
+        utc_offset_hours, timezone = _activity_timezone_context(timestamps, lat, lng)
+        activity_meta = {
+            'timestamps': timestamps,
+            'lat': lat,
+            'lng': lng,
+            'utc_offset_hours': utc_offset_hours,
+            'timezone': timezone,
+        }
+    else:
+        activity_meta = empty_meta.copy()
+
+    return flatfile, activity_meta
 
 def _distance_sampling_filename_prefix(user_name, species):
     '''Builds a shared S3 filename prefix for distance-sampling exports.'''
@@ -421,12 +470,19 @@ def _distance_results_from_r(r_results):
         'qaic_half_normal': _r_df_to_records('qaic_half_normal'),
         'qaic_hazard_rate': _r_df_to_records('qaic_hazard_rate'),
         'chi2_comparison': _r_df_to_records('chi2_comparison'),
+        'activity_multiplier_applied': _safe_bool('activity_multiplier_applied'),
+        'activity_rate': _safe_float('activity_rate'),
+        'activity_rate_se': _safe_float('activity_rate_se'),
+        'camera_hours_per_day': _safe_float('camera_hours_per_day'),
+        'activity_time_mode': _safe_str('activity_time_mode'),
+        'utc_offset_hours': _safe_float('utc_offset_hours'),
+        'timezone': _safe_str('timezone'),
         'plot_url': None,
     }
     return status, error, distance_results
 
 @app.task(name='WorkR.calculate_distance_sampling', bind=True, soft_time_limit=82800)
-def calculate_distance_sampling(self, task_ids, species, trapgroups, groups, startDate, endDate, area_km2, fov_degrees, user_id, folder, bucket, csv, left_trunc=None, right_trunc=None, snapshot_interval_seconds=2.0, time_to_independence=30, time_to_independence_unit='m'):
+def calculate_distance_sampling(self, task_ids, species, trapgroups, groups, startDate, endDate, area_km2, fov_degrees, user_id, folder, bucket, csv, left_trunc=None, right_trunc=None, snapshot_interval_seconds=2.0, time_to_independence=30, time_to_independence_unit='m', apply_activity_multiplier=False, camera_hours_per_day=24.0, activity_time_mode='clock'):
     '''Calculates camera-trap distance sampling density with R.'''
     try:
         pandas2ri.activate()
@@ -469,7 +525,7 @@ def calculate_distance_sampling(self, task_ids, species, trapgroups, groups, sta
                 if snapshot_interval_seconds is None or float(snapshot_interval_seconds) <= 0:
                     snapshot_interval_seconds = 2.0
 
-                flatfile = build_distance_flatfile(
+                flatfile, activity_meta = build_distance_flatfile(
                     task_ids,
                     survey_ids,
                     region_label,
@@ -487,15 +543,35 @@ def calculate_distance_sampling(self, task_ids, species, trapgroups, groups, sta
                 file_prefix = _distance_sampling_filename_prefix(user_name, species)
 
                 if csv:
+                    distance_results = {}
                     with tempfile.NamedTemporaryFile(delete=True, suffix='.csv') as temp_file:
                         flatfile.to_csv(temp_file.name, index=False)
                         fileName = folder + '/docs/' + file_prefix + '_Flatfile.csv'
                         temp_file = open(temp_file.name, 'rb')
                         s3client.put_object(Bucket=bucket, Key=fileName, Body=temp_file)
-                        flatfile_url = 'https://' + bucket + '.s3.amazonaws.com/' + fileName.replace('+','%2B').replace('?','%3F').replace('#','%23').replace('\\','%5C')
-                        distance_results = {
-                            'flatfile_url': flatfile_url
-                        }
+                        distance_results['flatfile_url'] = 'https://' + bucket + '.s3.amazonaws.com/' + fileName.replace('+','%2B').replace('?','%3F').replace('#','%23').replace('\\','%5C')
+
+                    if activity_meta['timestamps']:
+                        activity_ts_df = pd.DataFrame({'timestamp': activity_meta['timestamps']})
+                        with tempfile.NamedTemporaryFile(delete=True, suffix='.csv') as temp_file:
+                            activity_ts_df.to_csv(temp_file.name, index=False)
+                            fileName = folder + '/docs/' + file_prefix + '_Activity_Timestamps.csv'
+                            temp_file = open(temp_file.name, 'rb')
+                            s3client.put_object(Bucket=bucket, Key=fileName, Body=temp_file)
+                            distance_results['activity_timestamps_url'] = 'https://' + bucket + '.s3.amazonaws.com/' + fileName.replace('+','%2B').replace('?','%3F').replace('#','%23').replace('\\','%5C')
+
+                        activity_params_df = pd.DataFrame([{
+                            'lat': activity_meta['lat'],
+                            'lng': activity_meta['lng'],
+                            'utc_offset_hours': activity_meta['utc_offset_hours'],
+                            'timezone': activity_meta['timezone'],
+                        }])
+                        with tempfile.NamedTemporaryFile(delete=True, suffix='.csv') as temp_file:
+                            activity_params_df.to_csv(temp_file.name, index=False)
+                            fileName = folder + '/docs/' + file_prefix + '_Activity_Params.csv'
+                            temp_file = open(temp_file.name, 'rb')
+                            s3client.put_object(Bucket=bucket, Key=fileName, Body=temp_file)
+                            distance_results['activity_params_url'] = 'https://' + bucket + '.s3.amazonaws.com/' + fileName.replace('+','%2B').replace('?','%3F').replace('#','%23').replace('\\','%5C')
                 elif flatfile.empty:
                     distance_results = {
                         'status': 'FAILURE',
@@ -523,6 +599,17 @@ def calculate_distance_sampling(self, task_ids, species, trapgroups, groups, sta
                     r = robjects.r
                     r.source('R/distance_sampling.R')
 
+                    if activity_meta['timestamps']:
+                        detection_times_r = robjects.conversion.py2rpy(pd.to_datetime(activity_meta['timestamps']))
+                    else:
+                        detection_times_r = robjects.r('NULL')
+                    lat_r = float(activity_meta['lat']) if activity_meta['lat'] is not None else robjects.r('NA_real_')
+                    lng_r = float(activity_meta['lng']) if activity_meta['lng'] is not None else robjects.r('NA_real_')
+                    utc_offset_hours = float(activity_meta.get('utc_offset_hours') or 0.0)
+                    timezone_r = str(activity_meta.get('timezone') or 'UTC')
+
+                    activity_time_mode_r = str(activity_time_mode or 'clock').lower()
+
                     with tempfile.NamedTemporaryFile(delete=True, suffix='.JPG') as temp_file:
                         plot_file = temp_file.name.split('.JPG')[0]
                         r_results = r.calculate_distance_sampling(
@@ -530,7 +617,15 @@ def calculate_distance_sampling(self, task_ids, species, trapgroups, groups, sta
                             float(fov_degrees),
                             left_trunc_r,
                             right_trunc_r,
-                            plot_file
+                            plot_file,
+                            bool(apply_activity_multiplier),
+                            float(camera_hours_per_day or 24),
+                            detection_times_r,
+                            lat_r,
+                            lng_r,
+                            float(utc_offset_hours),
+                            activity_time_mode_r,
+                            timezone_r,
                         )
                         r_status, r_error, distance_results = _distance_results_from_r(r_results)
 
