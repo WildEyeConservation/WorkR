@@ -600,7 +600,10 @@ def calculate_distance_sampling(self, task_ids, species, trapgroups, groups, sta
                     r.source('R/distance_sampling.R')
 
                     if activity_meta['timestamps']:
-                        detection_times_r = robjects.conversion.py2rpy(pd.to_datetime(activity_meta['timestamps']))
+                        detection_times = pd.to_datetime(activity_meta['timestamps'])
+                        detection_times_r = robjects.StrVector(
+                            detection_times.strftime('%Y-%m-%d %H:%M:%S').tolist()
+                        )
                     else:
                         detection_times_r = robjects.r('NULL')
                     lat_r = float(activity_meta['lat']) if activity_meta['lat'] is not None else robjects.r('NA_real_')
