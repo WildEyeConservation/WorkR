@@ -861,6 +861,49 @@ def _tte_abundance_filename_prefix(user_name, species):
 def _s3_docs_url(bucket, fileName):
     return 'https://' + bucket + '.s3.amazonaws.com/' + fileName.replace('+', '%2B').replace('?', '%3F').replace('#', '%23').replace('\\', '%5C')
 
+def _tte_sampling_period_seconds(deploy, species_speed_m_hr):
+    '''Matches spaceNtime tte_samp_per: sqrt(mean(area)) / speed (m/s).'''
+    if deploy.empty or species_speed_m_hr is None or float(species_speed_m_hr) <= 0:
+        return None
+    lps = float(species_speed_m_hr) / 3600.0
+    return float(math.sqrt(float(deploy['area'].mean())) / lps)
+
+def _build_tte_params_df(
+    species,
+    area_mode,
+    viewable_area_m2,
+    fov_degrees,
+    effective_detection_radius_m,
+    species_speed_m_hr,
+    study_area_m2,
+    nper,
+    time_btw_seconds,
+    study_start,
+    study_end,
+    deploy,
+):
+    '''One-row parameter table for standalone R reproduction of TTE analyses.'''
+    if isinstance(species, list):
+        species_label = species[0] if len(species) == 1 else ','.join(str(s) for s in species)
+    else:
+        species_label = str(species)
+
+    params = {
+        'species': species_label,
+        'area_mode': area_mode,
+        'viewable_area_m2': float(viewable_area_m2) if viewable_area_m2 is not None else None,
+        'study_area_m2': float(study_area_m2),
+        'species_speed_m_hr': float(species_speed_m_hr),
+        'nper': int(nper),
+        'time_btw_seconds': float(time_btw_seconds),
+        'study_start': pd.to_datetime(study_start).strftime('%Y-%m-%d %H:%M:%S') if study_start is not None else None,
+        'study_end': pd.to_datetime(study_end).strftime('%Y-%m-%d %H:%M:%S') if study_end is not None else None,
+        'fov_degrees': float(fov_degrees) if fov_degrees is not None else None,
+        'effective_detection_radius_m': float(effective_detection_radius_m) if effective_detection_radius_m is not None else None,
+        'sampling_period_seconds': _tte_sampling_period_seconds(deploy, species_speed_m_hr),
+    }
+    return pd.DataFrame([params])
+
 def _tte_results_from_r(r_results):
     status = str(r_results.rx2('status')[0])
     try:
@@ -1002,6 +1045,27 @@ def calculate_space_ntime_tte(
                         with open(temp_file.name, 'rb') as handle:
                             s3client.put_object(Bucket=bucket, Key=fileName, Body=handle)
                         tte_results['deploy_url'] = _s3_docs_url(bucket, fileName)
+
+                    params_df = _build_tte_params_df(
+                        species,
+                        area_mode,
+                        viewable_area_m2,
+                        fov_degrees,
+                        effective_detection_radius_m,
+                        species_speed_m_hr,
+                        study_area_m2,
+                        nper,
+                        time_btw_seconds,
+                        study_start,
+                        study_end,
+                        deploy,
+                    )
+                    with tempfile.NamedTemporaryFile(delete=True, suffix='.csv') as temp_file:
+                        params_df.to_csv(temp_file.name, index=False)
+                        fileName = folder + '/docs/' + file_prefix + '_Params.csv'
+                        with open(temp_file.name, 'rb') as handle:
+                            s3client.put_object(Bucket=bucket, Key=fileName, Body=handle)
+                        tte_results['params_url'] = _s3_docs_url(bucket, fileName)
                 elif status == 'SUCCESS' and (deploy.empty or df.empty):
                     tte_results = {
                         'status': 'FAILURE',
