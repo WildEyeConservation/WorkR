@@ -363,8 +363,9 @@ def build_distance_flatfile(task_ids, survey_ids, region_label, species, trapgro
     flatfile['distance'] = pd.to_numeric(flatfile['distance'], errors='coerce')
 
     if not detection_df.empty:
-        lat = float(detection_df['latitude'].mean())
-        lng = float(detection_df['longitude'].mean())
+        # Same site-location average as Activity Pattern (unique coords, then mean).
+        lat = float(detection_df['latitude'].unique().mean())
+        lng = float(detection_df['longitude'].unique().mean())
         timestamps = detection_df['timestamp'].tolist()
         utc_offset_hours, timezone = _activity_timezone_context(timestamps, lat, lng)
         activity_meta = {
