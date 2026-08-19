@@ -659,16 +659,6 @@ def calculate_distance_sampling(self, task_ids, species, trapgroups, groups, sta
 
     return {'status': status, 'error': error, 'distance_results': distance_results}
 
-def _compute_tte_viewable_area_from_fov(fov_degrees, distances):
-    '''Derives effective detection radius (95th percentile) and sector viewable area (m²).'''
-    if not distances:
-        return None, None
-    edr = float(np.percentile(distances, 95))
-    if edr <= 0 or fov_degrees is None or float(fov_degrees) <= 0:
-        return None, None
-    area = (float(fov_degrees) / 360.0) * math.pi * (edr ** 2)
-    return edr, area
-
 def _species_label_ids(task_ids, species):
     '''Resolves selected species descriptions to label IDs including child labels.'''
     if isinstance(species, str):
@@ -960,6 +950,7 @@ def calculate_space_ntime_tte(
     folder,
     bucket,
     csv,
+    effective_detection_radius_m=None,
 ):
     '''Calculates camera-trap TTE abundance with spaceNtime in R.'''
     try:
@@ -1001,21 +992,24 @@ def calculate_space_ntime_tte(
                 if species_speed_m_hr is None or float(species_speed_m_hr) <= 0:
                     species_speed_m_hr = 30.0
 
-                effective_detection_radius_m = None
-                if area_mode == 'fov':
-                    _, _, _, _, fov_meta = build_space_ntime_tte_data(
-                        task_ids, survey_ids, species, trapgroups, groups,
-                        startDate, endDate, 1.0,
+                try:
+                    viewable_area_m2 = float(viewable_area_m2) if viewable_area_m2 is not None else None
+                except (TypeError, ValueError):
+                    viewable_area_m2 = None
+                if viewable_area_m2 is None or viewable_area_m2 <= 0:
+                    status = 'FAILURE'
+                    error = 'Viewable area is required and must be greater than 0 m².'
+
+                try:
+                    effective_detection_radius_m = (
+                        float(effective_detection_radius_m)
+                        if effective_detection_radius_m is not None
+                        else None
                     )
-                    effective_detection_radius_m, computed_area = _compute_tte_viewable_area_from_fov(
-                        fov_degrees, fov_meta.get('distances') or [],
-                    )
-                    if computed_area is None:
-                        status = 'FAILURE'
-                        error = 'Could not derive viewable area from field of view and detection distances.'
-                        viewable_area_m2 = None
-                    else:
-                        viewable_area_m2 = computed_area
+                except (TypeError, ValueError):
+                    effective_detection_radius_m = None
+                if effective_detection_radius_m is not None and effective_detection_radius_m <= 0:
+                    effective_detection_radius_m = None
 
                 if status == 'SUCCESS':
                     df, deploy, study_start, study_end, meta = build_space_ntime_tte_data(
