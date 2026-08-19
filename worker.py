@@ -45,6 +45,6 @@ def calculate_distance_sampling(self, task_ids, species, trapgroups, groups, sta
     return {'status': None, 'error': None, 'distance_results': None}
 
 @app.task(name='WorkR.calculate_space_ntime_tte', bind=True, soft_time_limit=82800)
-def calculate_space_ntime_tte(self, task_ids, species, trapgroups, groups, startDate, endDate, area_mode, viewable_area_m2, fov_degrees, species_speed_m_hr, study_area_m2, nper, time_btw_seconds, user_id, folder, bucket, csv):
+def calculate_space_ntime_tte(self, task_ids, species, trapgroups, groups, startDate, endDate, area_mode, viewable_area_m2, fov_degrees, species_speed_m_hr, study_area_m2, nper, time_btw_seconds, user_id, folder, bucket, csv, effective_detection_radius_m=None):
     '''Stub: TTE abundance runs on statistics-queue workers (dev-morpho-master).'''
     return {'status': None, 'error': None, 'tte_results': None}
