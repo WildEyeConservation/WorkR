@@ -206,7 +206,7 @@ get_activity_from_csv <- function(){
   tz <- 'Africa/Johannesburg'
 
   # Calculate activity pattern
-  activity_results <- calculate_activity_pattern(species_data, file_name, species, centre, unit, time, overlap, lat, lng, utc_offset_hours, tz)
+  image_file_name <- calculate_activity_pattern(species_data, file_name, species, centre, unit, time, overlap, lat, lng, utc_offset_hours, tz)
 
-  return(activity_results)
+  return(image_file_name)
 }
