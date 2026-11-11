@@ -191,6 +191,15 @@ MIN_PER_BIN <- 3L
   if (length(ok) == 0L) {
     return(data.frame())
   }
+  # Distance::QAIC() stops when given a single model and no chat value.
+  if (length(ok) == 1L) {
+    return(data.frame(
+      Model = ok[[1L]]$label,
+      df = NA_real_,
+      QAIC = NA_real_,
+      stringsAsFactors = FALSE
+    ))
+  }
   models <- lapply(ok, function(x) x$model)
   qaic <- do.call(QAIC, unname(models))
   qaic <- as.data.frame(qaic)
@@ -283,7 +292,7 @@ MIN_PER_BIN <- 3L
     }
   } else {
     qaic_all <- .qaic_table(ok_fits)
-    if (nrow(qaic_all) == 0L) {
+    if (nrow(qaic_all) == 0L || all(is.na(qaic_all$QAIC))) {
       selected <- ok_fits[[1L]]
       selection_method <- "first_converged"
       warnings <- c(warnings, "Model selection fell back to the first converged model.")
