@@ -20,9 +20,10 @@
 # Cleans up and shuts down the worker in the case of the spot instance being revoked, or the worker being idle.
 echo "Initialising!"
 
-export WORKER_NAME=$1
+export BASE_WORKER_NAME=$1
 export QUEUE=$2
 export FLASK_APP=/code/TrapTagger.py
+export PYTHONPATH=/code
 export REDIS_IP=$3
 export DATABASE_NAME=$4
 export HOST_IP=$5
@@ -52,7 +53,7 @@ export AWS_S3_DOWNLOAD_ACCESS_KEY_ID=${28}
 export AWS_S3_DOWNLOAD_SECRET_ACCESS_KEY=${29}
 
 printf \
-'WORKER_NAME='$WORKER_NAME'\n'\
+'BASE_WORKER_NAME='$BASE_WORKER_NAME'\n'\
 'QUEUE='$QUEUE'\n'\
 'REDIS_IP='$REDIS_IP'\n'\
 'DATABASE_NAME='$DATABASE_NAME'\n'\
@@ -82,7 +83,25 @@ printf \
 'AWS_S3_DOWNLOAD_ACCESS_KEY_ID='$AWS_S3_DOWNLOAD_ACCESS_KEY_ID'\n'\
 'AWS_S3_DOWNLOAD_SECRET_ACCESS_KEY='$AWS_S3_DOWNLOAD_SECRET_ACCESS_KEY'\n'
 
-docker compose -f /home/ubuntu/TrapTagger/WorkR/docker-compose.yml up > worker.log 2>&1 &
+num_procs=$(nproc)
+for (( i=1; i<=num_procs; i++ )); do
+  export WORKER_NAME=$BASE_WORKER_NAME${i}
+  echo "Starting $WORKER_NAME"
+  docker run \
+    -e PYTHONPATH -e FLASK_APP -e REDIS_IP -e DATABASE_NAME -e HOST_IP -e DNS \
+    -e DATABASE_SERVER -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e REGION_NAME \
+    -e SECRET_KEY -e MAIL_USERNAME -e MAIL_PASSWORD -e BRANCH -e SG_ID \
+    -e PUBLIC_SUBNET_ID -e PRIVATE_SUBNET_ID -e TOKEN -e PARALLEL_AMI -e KEY_NAME \
+    -e QUEUE -e WORKER_NAME -e MAIN_GIT_REPO -e MONITORED_EMAIL_ADDRESS -e BUCKET \
+    -e IAM_ADMIN_GROUP -e AWS_S3_DOWNLOAD_ACCESS_KEY_ID -e AWS_S3_DOWNLOAD_SECRET_ACCESS_KEY \
+    -v /home/ubuntu/TrapTagger/WorkR:/code \
+    -v /home/ubuntu/TrapTagger/app/models.py:/code/app/models.py \
+    -v /home/ubuntu/TrapTagger/WorkR/__init__.py:/code/app/__init__.py \
+    --name workr$i workr:latest \
+    celery -A worker worker -E -n ${WORKER_NAME} -Q ${QUEUE} -Ofair --concurrency=${CONCURRENCY} --loglevel=info \
+    > worker$i.log 2>&1 &
+done
+
 LAUNCH_TIME="$(date -u +%s)"
 echo "Container launched"
 
@@ -106,9 +125,11 @@ while $flag; do
   elif [[ "$HTTP_CODE" -eq 200 ]] ; then
     # Spot instance has been re-allocated
     echo "Spot instance re-allocated! Shutting down..."
-    docker exec WorkR python3 cleanup_worker.py || STATUS=$?
-    docker exec WorkR2 python3 cleanup_worker.py || STATUS=$?
-    echo "Cleanup status: "$STATUS
+    for container in $(docker ps --format "{{.Names}}")
+    do
+      docker exec $container python3 cleanup_worker.py || STATUS=$?
+      echo "$container cleanup status: "$STATUS
+    done
     flag=false
   fi
 
@@ -116,11 +137,17 @@ while $flag; do
   if [ $(($(date -u +%s)-$LAUNCH_TIME)) -ge $SETUP_PERIOD ] && [ $((COUNT/$IDLE_MULTIPLIER)) -ge 1 ]; then
     echo "Checking idleness.."
     COUNT=0
-    docker exec WorkR bash celery_worker_monitor.sh ${WORKER_NAME} || STATUS1=$?
-    echo "STATUS1="$STATUS1
-    docker exec WorkR bash celery_worker_monitor.sh ${WORKER_NAME}2 || STATUS2=$?
-    echo "STATUS2="$STATUS2
-    if [ $STATUS1 == 50 ] || [ $STATUS2 == 50 ]; then
+    OVERALL_STATUS=0
+    for (( i=1; i<=num_procs; i++ ))
+    do
+      export WORKER_NAME=$BASE_WORKER_NAME${i}
+      docker exec workr1 bash celery_worker_monitor.sh ${WORKER_NAME} || STATUS=$?
+      echo "$WORKER_NAME STATUS="$STATUS
+      if [ $STATUS == 50 ]; then
+        OVERALL_STATUS=50
+      fi
+    done
+    if [ $OVERALL_STATUS == 50 ]; then
       IDLE_COUNT=0
     else
       # Worker is idle or is in an error state
@@ -128,15 +155,21 @@ while $flag; do
     fi
     if [ $IDLE_COUNT == 2 ]; then
       echo "Worker idle. Shutting down..."
-      docker exec WorkR python3 cleanup_worker.py || STATUS=$?
-      docker exec WorkR2 python3 cleanup_worker.py || STATUS=$?
-      echo "Cleanup status: "$STATUS
+      for container in $(docker ps --format "{{.Names}}")
+      do
+        docker exec $container python3 cleanup_worker.py || STATUS=$?
+        echo "$container cleanup status: "$STATUS
+      done
       flag=false
     fi
   fi
 
 done
 
-docker compose -f /home/ubuntu/TrapTagger/WorkR/docker-compose.yml down
+#Shut everything down
+for container in $(docker ps --format "{{.Names}}")
+do
+  docker stop $container
+done
 echo "Container shut down. Goodbye."
 poweroff

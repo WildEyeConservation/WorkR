@@ -19,7 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import os
 
 class Config(object):
-    WORKER_NAME = 'celery@worker'+str(os.environ.get('WORKER_NUMBER'))+'@'+os.environ.get('WORKER_NAME')
+    WORKER_NAME = 'celery@' + os.environ.get('WORKER_NAME')
     QUEUE = os.environ.get('QUEUE')
     MONKEY_PATCH = os.environ.get('MONKEY_PATCH')
     INITIAL_SETUP = False

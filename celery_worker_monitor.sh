@@ -1,4 +1,4 @@
-\#!/bin/bash
+#!/bin/bash
 
 # WorkR
 # Copyright (C) 2023

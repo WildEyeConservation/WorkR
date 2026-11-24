@@ -32,16 +32,16 @@ active_tasks.extend(inspector.active()[Config.WORKER_NAME])
 active_tasks.extend(inspector.reserved()[Config.WORKER_NAME])
 
 for active_task in active_tasks:
-    for function_location in ['worker']:
-        if function_location in active_task['name']:
-            module = importlib.import_module(function_location)
-            function_name = re.split(function_location+'.',active_task['name'])[1]
-            active_function = getattr(module, function_name)
-            break
+    task_name = active_task['name']
+    if not task_name.startswith('WorkR.'):
+        continue
+    module = importlib.import_module('worker')
+    function_name = task_name.split('.', 1)[1]
+    active_function = getattr(module, function_name)
     kwargs = active_task['kwargs']
     task_id = active_task['id']
     priority = active_task['delivery_info']['priority']
-    print('Rescheduling {} with args {}'.format(active_task['name'],kwargs))
+    print('Rescheduling {} with args {}'.format(task_name, kwargs))
     active_function.apply_async(kwargs=kwargs, queue=Config.QUEUE, priority=priority, task_id=task_id)
 
 sys.exit(99)
